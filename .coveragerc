@@ -1,0 +1,8 @@
+[run]
+branch = True
+source = lazylfs,tests
+
+[paths]
+source =
+    src/lazylfs
+    .tox/*/lib/python*/site-packages/lazylfs
