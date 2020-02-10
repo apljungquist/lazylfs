@@ -11,6 +11,7 @@ click==7.0                # via black, pip-tools
 coverage==5.0.3
 entrypoints==0.3          # via flake8
 filelock==3.0.12          # via tox
+fire==0.2.1
 flake8==3.7.9
 importlib-metadata==1.4.0  # via pluggy, pytest, tox
 mccabe==0.6.1             # via flake8
@@ -27,7 +28,8 @@ pyflakes==2.1.1           # via flake8
 pyparsing==2.4.6          # via packaging
 pytest==5.3.4
 regex==2020.1.8           # via black
-six==1.14.0               # via packaging, pip-tools, tox
+six==1.14.0               # via fire, packaging, pip-tools, tox
+termcolor==1.1.0          # via fire
 toml==0.10.0              # via black, tox
 tox==3.14.3
 typed-ast==1.4.1          # via black, mypy
