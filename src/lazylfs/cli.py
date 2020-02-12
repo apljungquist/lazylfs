@@ -4,7 +4,7 @@ import hashlib
 import logging
 import os
 import pathlib
-from typing import Union, TYPE_CHECKING, Collection, Dict
+from typing import Union, TYPE_CHECKING, Collection, Dict, Iterable
 
 from sprig import dictutils  # type: ignore
 
@@ -62,12 +62,30 @@ def _update_shasum_index(path: pathlib.Path, files: Collection[pathlib.Path]) ->
     _write_shasum_index(path, {**previous_index, **marginal_index})
 
 
-def _check_shasum_index(path: pathlib.Path) -> bool:
-    top = path.parent
-    index = _read_shasum_index(path)
-
+def _check_shasum_index(path: pathlib.Path, files: Collection[pathlib.Path]) -> bool:
     ok = True
-    for tail, expected in index.items():
+    top = path.parent
+    previous_index = _read_shasum_index(path)
+    previous_tails = set(previous_index)
+
+    current_tails = {file.relative_to(top) for file in files}
+
+    unchecked_tails = previous_tails - current_tails
+    if unchecked_tails:
+        _logger.info("%s tracked file(s) not included", len(unchecked_tails))
+        for tail in sorted(unchecked_tails):
+            _logger.debug("Not checked for %s", str(tail))
+
+    untracked_tails = current_tails - previous_tails
+    if untracked_tails:
+        _logger.info("%s included file(s) not tracked", len(untracked_tails))
+        ok = False
+        for tail in sorted(untracked_tails):
+            _logger.debug("Not tracked for %s", str(tail))
+
+    common_tails = previous_tails & current_tails
+    for tail in common_tails:
+        expected = previous_index[tail]
         try:
             actual = _sha256(top / tail)
         except FileNotFoundError:
@@ -82,6 +100,14 @@ def _check_shasum_index(path: pathlib.Path) -> bool:
             ok = False
 
     return ok
+
+
+def _find_files(
+    top: pathlib.Path, include: str, exclude: str
+) -> Iterable[pathlib.Path]:
+    included = set(path for path in top.glob(include) if path.is_file())
+    excluded = set(path for path in top.glob(exclude) if path.is_file())
+    return included - excluded
 
 
 def link(src: PathT, dst: PathT, include: str) -> None:
@@ -121,22 +147,29 @@ def track(top: PathT, include: str) -> None:
     """
     top = pathlib.Path(top)
     batches = dictutils.group_by(
-        (path for path in top.glob(include) if path.is_file()), lambda file: file.parent
+        _find_files(top, include, f"**/{_INDEX_NAME}"), lambda file: file.parent
     )
     for dir, files in batches.items():
         _update_shasum_index(dir / _INDEX_NAME, files)
 
 
-def check(top: PathT) -> None:
+def check(top: PathT, include: str) -> None:
     """Check the checksum of files against the index
 
     Exit with non-zero status if a difference is detected or a file could not be
     checked.
 
     :param top: Directory under which to look for files
+    :param include: Glob pattern specifying which files to track
     """
     top = pathlib.Path(top)
-    ok = all(_check_shasum_index(path) for path in top.rglob(_INDEX_NAME))
+    batches = dictutils.group_by(
+        _find_files(top, include, f"**/{_INDEX_NAME}"), lambda file: file.parent
+    )
+    ok = True
+    for dir, files in batches.items():
+        ok &= _check_shasum_index(dir / _INDEX_NAME, files)
+
     exit(not ok)
 
 
