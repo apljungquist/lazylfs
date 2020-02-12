@@ -102,12 +102,13 @@ def _check_shasum_index(path: pathlib.Path, files: Collection[pathlib.Path]) -> 
     return ok
 
 
-def _find_files(
-    top: pathlib.Path, include: str, exclude: str
-) -> Iterable[pathlib.Path]:
-    included = set(path for path in top.glob(include) if path.is_file())
-    excluded = set(path for path in top.glob(exclude) if path.is_file())
-    return included - excluded
+def _find_links(top: pathlib.Path, include: str) -> Iterable[pathlib.Path]:
+    included = set(
+        path
+        for path in top.glob(include)
+        if path.is_symlink() and (path.is_file() or not path.exists())
+    )
+    return included
 
 
 def link(src: PathT, dst: PathT, include: str) -> None:
@@ -146,9 +147,7 @@ def track(top: PathT, include: str) -> None:
     :param include: Glob pattern specifying which files to track
     """
     top = pathlib.Path(top)
-    batches = dictutils.group_by(
-        _find_files(top, include, f"**/{_INDEX_NAME}"), lambda file: file.parent
-    )
+    batches = dictutils.group_by(_find_links(top, include), lambda path: path.parent)
     for dir, files in batches.items():
         _update_shasum_index(dir / _INDEX_NAME, files)
 
@@ -163,9 +162,7 @@ def check(top: PathT, include: str) -> None:
     :param include: Glob pattern specifying which files to track
     """
     top = pathlib.Path(top)
-    batches = dictutils.group_by(
-        _find_files(top, include, f"**/{_INDEX_NAME}"), lambda file: file.parent
-    )
+    batches = dictutils.group_by(_find_links(top, include), lambda path: path.parent)
     ok = True
     for dir, files in batches.items():
         ok &= _check_shasum_index(dir / _INDEX_NAME, files)
