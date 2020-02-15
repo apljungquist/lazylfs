@@ -145,11 +145,11 @@ def test_workflow_lib(tmp_path):
     # Tamper with data
     (legacy_path / "a/g").write_text("stone")
     # Run checks
-    with pytest.raises(Exception):
+    with pytest.raises(cli.NotOkError):
         cli.check(repo_path)
-    with pytest.raises(Exception):
+    with pytest.raises(cli.NotOkError):
         cli.check(repo_path / "a/g")
-    with pytest.raises(Exception):
+    with pytest.raises(cli.NotOkError):
         cli.check(repo_path / "a/.shasum")
     # Restore data
     (legacy_path / "a/g").write_text(_SAMPLE_TREE["a"]["g"])
@@ -184,12 +184,31 @@ def test_workflow_lib(tmp_path):
     index[pathlib.Path("g")] = new
     cli._write_shasum_index(repo_path / "a/.shasum", index)
     # Run checks
-    with pytest.raises(Exception):
+    with pytest.raises(cli.NotOkError):
         cli.check(repo_path)
-    with pytest.raises(Exception):
+    with pytest.raises(cli.NotOkError):
         cli.check(repo_path / "a/g")
-    with pytest.raises(Exception):
+    with pytest.raises(cli.NotOkError):
         cli.check(repo_path / "a/.shasum")
+    # Restore data
+    index[pathlib.Path("g")] = old
+    cli._write_shasum_index(repo_path / "a/.shasum", index)
+
+    # Check that it is restored properly; refactor this test soon
+    cli.check(repo_path)
+    cli.check(repo_path / "a/g")
+    cli.check(repo_path / "a/.shasum")
+
+    # Tamper with data
+    del index[pathlib.Path("g")]
+    cli._write_shasum_index(repo_path / "a/.shasum", index)
+    # Run checks
+    with pytest.raises(cli.NotOkError):
+        cli.check(repo_path)
+    with pytest.raises(cli.NotOkError):
+        cli.check(repo_path / "a/g")
+    with pytest.raises(cli.NotOkError):
+        cli.check(repo_path / "a/.shasum")  # TODO: Should this fail or pass?
     # Restore data
     index[pathlib.Path("g")] = old
     cli._write_shasum_index(repo_path / "a/.shasum", index)
