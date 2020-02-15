@@ -5,6 +5,7 @@ import hashlib
 import logging
 import os
 import pathlib
+import sys
 from typing import Union, TYPE_CHECKING, Collection, Dict, Set
 
 from sprig import dictutils  # type: ignore
@@ -172,6 +173,9 @@ def check(*includes: PathT) -> None:
     Exit with non-zero status if a difference is detected or a file could not be
     checked.
     """
+    if len(includes) == 1 and includes[0] == "-":
+        includes = tuple([line.rstrip() for line in sys.stdin.readlines()])
+
     batches = dictutils.group_by(_find_links(includes), lambda path: path.parent)
     ok = True
     for dir, files in batches.items():

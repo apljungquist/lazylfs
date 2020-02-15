@@ -226,16 +226,31 @@ def test_workflow_cli(tmp_path):
     # * the subprocess calls are slow, and
     # * I am lazy
 
-    run = functools.partial(subprocess.run, check=True, capture_output=True)
+    run = functools.partial(subprocess.run, check=True, text=True, capture_output=True)
     base_cmd = ["lazylfs"]
     assert not run(
         base_cmd + ["link", str(legacy_path / "a"), str(repo_path / "a")]
     ).stdout
     assert not run(base_cmd + ["track", str(repo_path)]).stdout
     assert not run(base_cmd + ["check", str(repo_path)]).stdout
+    assert not run(
+        base_cmd + ["check", "'-'"],
+        input="\n".join(map(str, (path for path in repo_path.rglob("*")))),
+    ).stdout
 
     (legacy_path / "a/g").write_text("stone")
 
-    proc = subprocess.run(base_cmd + ["check", str(repo_path)], capture_output=True)
+    proc = subprocess.run(
+        base_cmd + ["check", str(repo_path)], capture_output=True, text=True
+    )
+    assert not proc.stdout
+    assert proc.returncode
+
+    proc = subprocess.run(
+        base_cmd + ["check", "'-'"],
+        capture_output=True,
+        text=True,
+        input="\n".join(map(str, (path for path in repo_path.rglob("*")))),
+    )
     assert not proc.stdout
     assert proc.returncode
