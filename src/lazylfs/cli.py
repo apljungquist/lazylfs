@@ -119,33 +119,24 @@ def _find_links(includes: Collection[PathT]) -> Set[pathlib.Path]:
     return included
 
 
-def _find_paths(include: pathlib.Path) -> Set[pathlib.Path]:
-    included: Set[pathlib.Path] = set()
-    for path in glob.glob(str(include)):
-        if os.path.isdir(path):
-            included.add(pathlib.Path(path))
-            included.update(pathlib.Path(path).rglob("*"))
-        else:
-            included.add(pathlib.Path(path))
-    return included
-
-
-def link(src: PathT, dst: PathT, include: str = "*") -> None:
-    """Create links in `dst` to the corresponding file in `src`
+def link(src: PathT, dst: PathT) -> None:
+    """Create links in `dst` to the corresponding files in `src`
 
     :param src: Directory under which to look for files
     :param dst: Directory under which to create symlinks
-    :param include: Glob pattern specifying which files to include
     """
     src = pathlib.Path(src).resolve()
     dst = pathlib.Path(dst).resolve()
 
+    if not src.is_dir():
+        raise ValueError("Expected src to be a directory")
+
     src_tails = {
         pathlib.Path(path).relative_to(src)
-        for path in _find_paths(src / include)
+        for path in src.rglob("*")
         if path.is_file() and not path.is_symlink()
     }
-    dst_tails = {path.relative_to(dst) for path in _find_paths(dst / include)}
+    dst_tails = {path.relative_to(dst) for path in dst.rglob("*")}
 
     conflicts = src_tails & dst_tails
     if conflicts:
