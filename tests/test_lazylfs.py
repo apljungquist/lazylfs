@@ -63,7 +63,7 @@ def test_workflow_lib(tmp_path):
     cli.track(repo_path)
     cli.check(repo_path)
 
-    (legacy_path / "k").write_text("stone")
+    (legacy_path / "a/g").write_text("stone")
 
     with pytest.raises(Exception):
         cli.check(repo_path)
@@ -84,7 +84,7 @@ def test_workflow_cli(tmp_path):
     assert not run(base_cmd + ["track", str(repo_path)]).stdout
     assert not run(base_cmd + ["check", str(repo_path)]).stdout
 
-    (legacy_path / "k").write_text("stone")
+    (legacy_path / "a/g").write_text("stone")
 
     proc = subprocess.run(base_cmd + ["check", str(repo_path)], capture_output=True)
     assert not proc.stdout
