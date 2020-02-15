@@ -137,11 +137,12 @@ def link(src: PathT, dst: PathT, include: str) -> None:
         for path in src.glob(include)
         if path.is_file() and not path.is_symlink()
     }
-    dst_tails = {path.relative_to(dst) for path in dst.glob(include) if path.is_file()}
+    dst_tails = {path.relative_to(dst) for path in dst.glob(include)}
 
     conflicts = src_tails & dst_tails
     if conflicts:
-        _logger.debug("%s paths already exist in the destination", len(conflicts))
+        for tail in conflicts:
+            _logger.debug("Path already exist in the destination: %s", str(tail))
         raise FileExistsError("Some paths already exist in the destination")
 
     dst.mkdir(exist_ok=True)
