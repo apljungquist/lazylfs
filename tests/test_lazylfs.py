@@ -134,9 +134,13 @@ def test_workflow_lib(tmp_path):
     cli.link(legacy_path / "a", repo_path / "a")
     cli.track(repo_path)
 
+    (repo_path / "a/x").write_text("xulu")
+
     cli.check(repo_path)
     cli.check(repo_path / "a/g")
     cli.check(repo_path / "a/.shasum")
+    cli.check(repo_path / "a/does_not_exist")  # TODO: Should this fail?
+    cli.check(repo_path / "a/x")
 
     # Tamper with data
     (legacy_path / "a/g").write_text("stone")
