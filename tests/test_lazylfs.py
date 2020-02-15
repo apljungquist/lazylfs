@@ -133,12 +133,25 @@ def test_workflow_lib(tmp_path):
 
     cli.link(legacy_path / "a", repo_path / "a")
     cli.track(repo_path)
+
     cli.check(repo_path)
+    cli.check(repo_path / "a/g")
 
     (legacy_path / "a/g").write_text("stone")
-
     with pytest.raises(Exception):
         cli.check(repo_path)
+    with pytest.raises(Exception):
+        cli.check(repo_path / "a/g")
+    (legacy_path / "a/g").write_text(_SAMPLE_TREE["a"]["g"])
+
+    cli.check(repo_path)  # Check that it is restored properly; refactor this test soon
+    cli.check(repo_path / "a/g")
+
+    (legacy_path / "a/g").unlink()
+    cli.check(repo_path)  # TODO: Should this fail or pass?
+    with pytest.raises(Exception):
+        cli.check(repo_path / "a/g")
+    (legacy_path / "a/g").write_text(_SAMPLE_TREE["a"]["g"])
 
 
 def test_workflow_cli(tmp_path):
