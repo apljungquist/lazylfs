@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import glob
 import hashlib
 import logging
 import os
 import pathlib
-from typing import Union, TYPE_CHECKING, Collection, Dict, Iterable
+from typing import Union, TYPE_CHECKING, Collection, Dict, Iterable, Set
 
 from sprig import dictutils  # type: ignore
 
@@ -102,12 +103,20 @@ def _check_shasum_index(path: pathlib.Path, files: Collection[pathlib.Path]) -> 
     return ok
 
 
-def _find_links(top: pathlib.Path, include: str) -> Iterable[pathlib.Path]:
-    included = set(
-        path
-        for path in top.glob(include)
-        if path.is_symlink() and (path.is_file() or not path.exists())
-    )
+def _find_links(includes: Iterable[PathT]) -> Set[pathlib.Path]:
+    included: Set[pathlib.Path] = set()
+    for include in includes:
+        for path in glob.glob(str(include)):
+            if os.path.isdir(path):
+                files = glob.glob(os.path.join(path, "**"))
+            elif os.path.isfile(path):
+                files = [path]
+            else:
+                raise RuntimeError("Unexpected path type")
+
+            included.update(
+                pathlib.Path(file) for file in files if os.path.islink(path)
+            )
     return included
 
 
@@ -140,29 +149,20 @@ def link(src: PathT, dst: PathT, include: str) -> None:
         dst_path.symlink_to(src_path)
 
 
-def track(top: PathT, include: str) -> None:
-    """Track the checksum of files in the index
-
-    :param top: Directory under which to look for files
-    :param include: Glob pattern specifying which files to track
-    """
-    top = pathlib.Path(top)
-    batches = dictutils.group_by(_find_links(top, include), lambda path: path.parent)
+def track(*includes: PathT) -> None:
+    """Track the checksum of files in the index"""
+    batches = dictutils.group_by(_find_links(includes), lambda path: path.parent)
     for dir, files in batches.items():
         _update_shasum_index(dir / _INDEX_NAME, files)
 
 
-def check(top: PathT, include: str) -> None:
+def check(*includes: PathT) -> None:
     """Check the checksum of files against the index
 
     Exit with non-zero status if a difference is detected or a file could not be
     checked.
-
-    :param top: Directory under which to look for files
-    :param include: Glob pattern specifying which files to track
     """
-    top = pathlib.Path(top)
-    batches = dictutils.group_by(_find_links(top, include), lambda path: path.parent)
+    batches = dictutils.group_by(_find_links(includes), lambda path: path.parent)
     ok = True
     for dir, files in batches.items():
         ok &= _check_shasum_index(dir / _INDEX_NAME, files)

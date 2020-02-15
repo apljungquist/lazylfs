@@ -57,7 +57,7 @@ def test_workflow(tmp_path):
     repo_path.mkdir()
 
     cli.link(legacy_path, repo_path, "a/**/*")
-    cli.track(repo_path, "**/*")
+    cli.track(repo_path)
     with pytest.raises(SystemExit) as exc_info:
-        cli.check(repo_path, "**/*")
+        cli.check(repo_path)
     assert not exc_info.value.code
