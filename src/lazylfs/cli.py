@@ -12,7 +12,7 @@ from sprig import dictutils  # type: ignore
 _logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    PathT = Union[str, os.PathLike[str]]
+    PathT = Union[str, os.PathLike[str], pathlib.Path]
 
 _INDEX_NAME = ".shasum"
 
