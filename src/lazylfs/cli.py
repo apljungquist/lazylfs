@@ -177,6 +177,18 @@ def check(*includes: PathT) -> None:
     for dir, files in batches.items():
         ok &= _check_shasum_index(dir / _INDEX_NAME, files)
 
+    for path in includes:
+        path = pathlib.Path(path)
+        if path.name == _INDEX_NAME:
+            ok &= _check_shasum_index(
+                path,
+                [
+                    link
+                    for link in path.parent.iterdir()
+                    if link.is_file() and link.is_symlink()
+                ],
+            )
+
     if not ok:
         raise NotOkError
 

@@ -136,22 +136,59 @@ def test_workflow_lib(tmp_path):
 
     cli.check(repo_path)
     cli.check(repo_path / "a/g")
+    cli.check(repo_path / "a/.shasum")
 
+    # Tamper with data
     (legacy_path / "a/g").write_text("stone")
+    # Run checks
     with pytest.raises(Exception):
         cli.check(repo_path)
     with pytest.raises(Exception):
         cli.check(repo_path / "a/g")
+    with pytest.raises(Exception):
+        cli.check(repo_path / "a/.shasum")
+    # Restore data
     (legacy_path / "a/g").write_text(_SAMPLE_TREE["a"]["g"])
 
-    cli.check(repo_path)  # Check that it is restored properly; refactor this test soon
+    # Check that it is restored properly; refactor this test soon
+    cli.check(repo_path)
     cli.check(repo_path / "a/g")
+    cli.check(repo_path / "a/.shasum")
 
+    # Tamper with data
     (legacy_path / "a/g").unlink()
+    # Run checks
     cli.check(repo_path)  # TODO: Should this fail or pass?
     with pytest.raises(Exception):
         cli.check(repo_path / "a/g")
+    cli.check(repo_path / "a/.shasum")  # TODO: Should this fail or pass?
+    # Restore data
     (legacy_path / "a/g").write_text(_SAMPLE_TREE["a"]["g"])
+
+    # Check that it is restored properly; refactor this test soon
+    cli.check(repo_path)
+    cli.check(repo_path / "a/g")
+    cli.check(repo_path / "a/.shasum")
+
+    # Tamper with data
+    index = cli._read_shasum_index(repo_path / "a/.shasum")
+    old = index[pathlib.Path("g")]
+    new = old[:-1] + "0"
+    if old == new:
+        new = old[:-1] + "1"
+    assert old != new
+    index[pathlib.Path("g")] = new
+    cli._write_shasum_index(repo_path / "a/.shasum", index)
+    # Run checks
+    with pytest.raises(Exception):
+        cli.check(repo_path)
+    with pytest.raises(Exception):
+        cli.check(repo_path / "a/g")
+    with pytest.raises(Exception):
+        cli.check(repo_path / "a/.shasum")
+    # Restore data
+    index[pathlib.Path("g")] = old
+    cli._write_shasum_index(repo_path / "a/.shasum", index)
 
 
 def test_workflow_cli(tmp_path):
