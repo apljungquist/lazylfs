@@ -5,7 +5,7 @@ import hashlib
 import logging
 import os
 import pathlib
-from typing import Union, TYPE_CHECKING, Collection, Dict, Iterable, Set
+from typing import Union, TYPE_CHECKING, Collection, Dict, Set
 
 from sprig import dictutils  # type: ignore
 
@@ -103,26 +103,34 @@ def _check_shasum_index(path: pathlib.Path, files: Collection[pathlib.Path]) -> 
     return ok
 
 
-def _find_links(includes: Iterable[PathT]) -> Set[pathlib.Path]:
+def _find_links(includes: Collection[PathT]) -> Set[pathlib.Path]:
     included: Set[pathlib.Path] = set()
     for include in includes:
         for path in glob.glob(str(include)):
             if os.path.isdir(path):
-                files = filter(
-                    os.path.isfile, glob.glob(os.path.join(path, "**"), recursive=True)
-                )
+                # `glob.glob("**", recursive=True)` does not play nice with symlink loops
+                files = filter(os.path.isfile, pathlib.Path(path).rglob("*"))
             elif os.path.isfile(path):
-                files = iter([path])
+                files = iter([pathlib.Path(path)])
             else:
                 raise RuntimeError("Unexpected path type")
 
-            included.update(
-                pathlib.Path(file) for file in files if os.path.islink(file)
-            )
+            included.update(file for file in files if os.path.islink(file))
     return included
 
 
-def link(src: PathT, dst: PathT, include: str) -> None:
+def _find_paths(include: pathlib.Path) -> Set[pathlib.Path]:
+    included: Set[pathlib.Path] = set()
+    for path in glob.glob(str(include)):
+        if os.path.isdir(path):
+            included.add(pathlib.Path(path))
+            included.update(pathlib.Path(path).rglob("*"))
+        else:
+            included.add(pathlib.Path(path))
+    return included
+
+
+def link(src: PathT, dst: PathT, include: str = "*") -> None:
     """Create links in `dst` to the corresponding file in `src`
 
     :param src: Directory under which to look for files
@@ -133,11 +141,11 @@ def link(src: PathT, dst: PathT, include: str) -> None:
     dst = pathlib.Path(dst).resolve()
 
     src_tails = {
-        path.relative_to(src)
-        for path in src.glob(include)
+        pathlib.Path(path).relative_to(src)
+        for path in _find_paths(src / include)
         if path.is_file() and not path.is_symlink()
     }
-    dst_tails = {path.relative_to(dst) for path in dst.glob(include)}
+    dst_tails = {path.relative_to(dst) for path in _find_paths(dst / include)}
 
     conflicts = src_tails & dst_tails
     if conflicts:

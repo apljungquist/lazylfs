@@ -32,6 +32,8 @@ _SAMPLE_TREE = {
         "sister": Link("./e/"),
         "nephew": Link("./e/f"),
         "brother": Link("./g"),
+        "brothers_brother0": Link("./brothers_brother1"),
+        "brothers_brother1": Link("./brothers_brother0"),
         "aunt": Link("../i/"),
         "cousin": Link("../i/j"),
         "uncle": Link("../k"),
@@ -111,25 +113,25 @@ def test_workflow_lib(tmp_path):
     with _TmpDir(repo_path / "a") as a:
         with _TmpDir(a / "g"):
             with pytest.raises(FileExistsError):
-                cli.link(legacy_path, repo_path, "a/**/*")
+                cli.link(legacy_path, repo_path, "a")
 
         with _TmpFile(a / "g"):
             with pytest.raises(FileExistsError):
-                cli.link(legacy_path, repo_path, "a/**/*")
+                cli.link(legacy_path, repo_path, "a")
 
         with _TmpLink(a / "g", _mktemp(dir=tmp_path)) as g:
             with pytest.raises(FileExistsError):
-                cli.link(legacy_path, repo_path, "a/**/*")
+                cli.link(legacy_path, repo_path, "a")
             g.resolve().unlink()
 
             with pytest.raises(FileExistsError):
-                cli.link(legacy_path, repo_path, "a/**/*")
+                cli.link(legacy_path, repo_path, "a")
 
     # The above failures should have created no files
     # (It would probably fail before this point as `a` cannot be removed if it is not empty)
     assert not list(repo_path.rglob("*"))
 
-    cli.link(legacy_path, repo_path, "a/**/*")
+    cli.link(legacy_path, repo_path, "a")
     cli.track(repo_path)
     cli.check(repo_path)
 
@@ -153,9 +155,7 @@ def test_workflow_cli(tmp_path):
 
     run = functools.partial(subprocess.run, check=True, capture_output=True)
     base_cmd = ["lazylfs"]
-    assert not run(
-        base_cmd + ["link", str(legacy_path), str(repo_path), "a/**/*"]
-    ).stdout
+    assert not run(base_cmd + ["link", str(legacy_path), str(repo_path), "a"]).stdout
     assert not run(base_cmd + ["track", str(repo_path)]).stdout
     assert not run(base_cmd + ["check", str(repo_path)]).stdout
 
