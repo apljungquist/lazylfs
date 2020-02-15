@@ -4,6 +4,9 @@ This is for pytest to find and stop being upset not finding any tests.
 >>> 'Happy?'[:-1]
 'Happy'
 """
+import functools
+import subprocess
+
 import pytest
 
 from lazylfs import cli
@@ -49,7 +52,7 @@ def _create_tree(path, spec):
         raise ValueError
 
 
-def test_workflow(tmp_path):
+def test_workflow_lib(tmp_path):
     legacy_path = tmp_path / "legacy"
     _create_tree(legacy_path, _SAMPLE_TREE)
 
@@ -58,6 +61,31 @@ def test_workflow(tmp_path):
 
     cli.link(legacy_path, repo_path, "a/**/*")
     cli.track(repo_path)
-    with pytest.raises(SystemExit) as exc_info:
+    cli.check(repo_path)
+
+    (legacy_path / "k").write_text("stone")
+
+    with pytest.raises(Exception):
         cli.check(repo_path)
-    assert not exc_info.value.code
+
+
+def test_workflow_cli(tmp_path):
+    legacy_path = tmp_path / "legacy"
+    _create_tree(legacy_path, _SAMPLE_TREE)
+
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+
+    run = functools.partial(subprocess.run, check=True, capture_output=True)
+    base_cmd = ["lazylfs"]
+    assert not run(
+        base_cmd + ["link", str(legacy_path), str(repo_path), "a/**/*"]
+    ).stdout
+    assert not run(base_cmd + ["track", str(repo_path)]).stdout
+    assert not run(base_cmd + ["check", str(repo_path)]).stdout
+
+    (legacy_path / "k").write_text("stone")
+
+    proc = subprocess.run(base_cmd + ["check", str(repo_path)], capture_output=True)
+    assert not proc.stdout
+    assert proc.returncode

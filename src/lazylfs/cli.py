@@ -108,14 +108,16 @@ def _find_links(includes: Iterable[PathT]) -> Set[pathlib.Path]:
     for include in includes:
         for path in glob.glob(str(include)):
             if os.path.isdir(path):
-                files = glob.glob(os.path.join(path, "**"))
+                files = filter(
+                    os.path.isfile, glob.glob(os.path.join(path, "**"), recursive=True)
+                )
             elif os.path.isfile(path):
-                files = [path]
+                files = iter([path])
             else:
                 raise RuntimeError("Unexpected path type")
 
             included.update(
-                pathlib.Path(file) for file in files if os.path.islink(path)
+                pathlib.Path(file) for file in files if os.path.islink(file)
             )
     return included
 
@@ -156,6 +158,10 @@ def track(*includes: PathT) -> None:
         _update_shasum_index(dir / _INDEX_NAME, files)
 
 
+class NotOkError(Exception):
+    pass
+
+
 def check(*includes: PathT) -> None:
     """Check the checksum of files against the index
 
@@ -167,7 +173,8 @@ def check(*includes: PathT) -> None:
     for dir, files in batches.items():
         ok &= _check_shasum_index(dir / _INDEX_NAME, files)
 
-    exit(not ok)
+    if not ok:
+        raise NotOkError
 
 
 def main():
