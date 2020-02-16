@@ -4,12 +4,13 @@ This is for pytest to find and stop being upset not finding any tests.
 >>> 'Happy?'[:-1]
 'Happy'
 """
+import contextlib
 import functools
+import hashlib
 import os
 import pathlib
+import stat
 import subprocess
-import tempfile
-from typing import Union
 
 import pytest
 
@@ -28,6 +29,7 @@ _SAMPLE_TREE = {
     "a": {
         "e": {"f": File("foxtrot")},
         "g": File("golf"),
+        "h": File("hotel"),
         "mother": Link("../a/"),
         "sister": Link("./e/"),
         "nephew": Link("./e/f"),
@@ -58,160 +60,231 @@ def _create_tree(path, spec):
         raise ValueError
 
 
-def _mktemp(*args, **kwargs):
-    # `tempfile.mktemp` is deprecated but I still want a way to create a new file
-    # without having to find a unique name myself or worry about open file descriptors.
-    fd, path = tempfile.mkstemp(*args, **kwargs)
-    os.close(fd)
-    return path
+def _sha256(*data: bytes) -> bytes:
+    h = hashlib.sha256()
+    for datum in data:
+        h.update(datum)
+    return h.digest()
 
 
-class _TmpDir:
-    def __init__(self, path: pathlib.Path):
-        self._path = path
+def _calc_fingerprint(path: pathlib.Path, recursive: bool) -> bytes:
+    s = path.lstat()
+    # These should be stable, st_atime notably is not
+    stable_attrs = [
+        "st_mode",
+        "st_uid",
+        "st_gid",
+        "st_mtime",
+        "st_ctime",
+    ]
+    meta_checksum = _sha256(
+        ",".join(f"{attr}={getattr(s, attr)}" for attr in stable_attrs).encode()
+    )
 
-    def __enter__(self):
-        self._path.mkdir()
-        return self._path
+    if stat.S_ISLNK(s.st_mode):
+        data_checksum = _sha256(os.readlink(path).encode())
+    elif stat.S_ISREG(s.st_mode):
+        data_checksum = _sha256(path.read_bytes())
+    elif stat.S_ISDIR(s.st_mode) and recursive:
+        data_checksum = _sha256(
+            *(
+                _calc_fingerprint(sub, recursive=recursive)
+                for sub in sorted(path.iterdir())
+            )
+        )
+    else:
+        data_checksum = _sha256(b"")
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self._path.rmdir()
-
-
-class _TmpLink:
-    def __init__(self, path: pathlib.Path, tgt: Union[str, pathlib.Path]):
-        self._path = path
-        self._tgt = tgt
-
-    def __enter__(self):
-        self._path.symlink_to(self._tgt)
-        return self._path
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self._path.unlink()
-
-
-class _TmpFile:
-    def __init__(self, path: pathlib.Path):
-        self._path = path
-
-    def __enter__(self):
-        self._path.touch()
-        return self._path
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self._path.unlink()
+    return _sha256((meta_checksum + data_checksum))
 
 
-def test_workflow_lib(tmp_path):
+@contextlib.contextmanager
+def assert_nullipotent(path):
+    before = _calc_fingerprint(path, True)
+    yield
+    after = _calc_fingerprint(path, True)
+    assert after == before
+
+
+@pytest.fixture()
+def base_legacy(tmp_path):
     legacy_path = tmp_path / "legacy"
     _create_tree(legacy_path, _SAMPLE_TREE)
+    yield legacy_path
 
+
+@pytest.fixture()
+def base_repo(tmp_path, base_legacy):
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
-
-    with _TmpDir(repo_path / "a") as a:
-        with _TmpDir(a / "g"):
-            with pytest.raises(FileExistsError):
-                cli.link(legacy_path / "a", repo_path / "a")
-
-        with _TmpFile(a / "g"):
-            with pytest.raises(FileExistsError):
-                cli.link(legacy_path / "a", repo_path / "a")
-
-        with _TmpLink(a / "g", _mktemp(dir=tmp_path)) as g:
-            with pytest.raises(FileExistsError):
-                cli.link(legacy_path / "a", repo_path / "a")
-            g.resolve().unlink()
-
-            with pytest.raises(FileExistsError):
-                cli.link(legacy_path / "a", repo_path / "a")
-
-    # The above failures should have created no files
-    # (It would probably fail before this point as `a` cannot be removed if it is not empty)
-    assert not list(repo_path.rglob("*"))
-
-    cli.link(legacy_path / "a", repo_path / "a")
+    cli.link(base_legacy / "a", repo_path / "a")
     cli.track(repo_path)
 
-    (repo_path / "a/x").write_text("xulu")
+    (repo_path / "a/reg").touch()
+    (repo_path / "a/dir").mkdir()
 
-    cli.check(repo_path)
-    cli.check(repo_path / "a/g")
-    cli.check(repo_path / "a/.shasum")
-    cli.check(repo_path / "a/does_not_exist")  # TODO: Should this fail?
-    cli.check(repo_path / "a/x")
+    yield repo_path
 
-    # Tamper with data
-    (legacy_path / "a/g").write_text("stone")
-    # Run checks
-    with pytest.raises(cli.NotOkError):
-        cli.check(repo_path)
-    with pytest.raises(cli.NotOkError):
-        cli.check(repo_path / "a/g")
-    with pytest.raises(cli.NotOkError):
-        cli.check(repo_path / "a/.shasum")
-    # Restore data
-    (legacy_path / "a/g").write_text(_SAMPLE_TREE["a"]["g"])
 
-    # Check that it is restored properly; refactor this test soon
-    cli.check(repo_path)
-    cli.check(repo_path / "a/g")
-    cli.check(repo_path / "a/.shasum")
+@pytest.mark.parametrize(
+    "create_path",
+    [
+        lambda path: path.parent.mkdir() or path.touch(),
+        lambda path: path.parent.mkdir() or path.symlink_to("anything"),
+    ],
+)
+def test_link_fails_if_existing_and_different(tmp_path, base_legacy, create_path):
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    create_path(repo_path / "a/g")
 
-    # Tamper with data
-    (legacy_path / "a/g").unlink()
-    # Run checks
-    cli.check(repo_path)  # TODO: Should this fail or pass?
-    with pytest.raises(Exception):
-        cli.check(repo_path / "a/g")
-    cli.check(repo_path / "a/.shasum")  # TODO: Should this fail or pass?
-    # Restore data
-    (legacy_path / "a/g").write_text(_SAMPLE_TREE["a"]["g"])
+    with assert_nullipotent(repo_path), pytest.raises(FileExistsError):
+        cli.link(base_legacy / "a", repo_path / "a")
 
-    # Check that it is restored properly; refactor this test soon
-    cli.check(repo_path)
-    cli.check(repo_path / "a/g")
-    cli.check(repo_path / "a/.shasum")
 
-    # Tamper with data
-    index = cli._read_shasum_index(repo_path / "a/.shasum")
-    old = index[pathlib.Path("g")]
-    new = old[:-1] + "0"
-    if old == new:
-        new = old[:-1] + "1"
-    assert old != new
-    index[pathlib.Path("g")] = new
-    cli._write_shasum_index(repo_path / "a/.shasum", index)
-    # Run checks
-    with pytest.raises(cli.NotOkError):
-        cli.check(repo_path)
-    with pytest.raises(cli.NotOkError):
-        cli.check(repo_path / "a/g")
-    with pytest.raises(cli.NotOkError):
-        cli.check(repo_path / "a/.shasum")
-    # Restore data
-    index[pathlib.Path("g")] = old
-    cli._write_shasum_index(repo_path / "a/.shasum", index)
+@pytest.mark.xfail(strict=True)  # FIXME
+def test_link_skips_if_existing_and_same(tmp_path, base_legacy):
+    # This enables idempotency
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    cli.link(base_legacy / "a", repo_path / "a")
 
-    # Check that it is restored properly; refactor this test soon
-    cli.check(repo_path)
-    cli.check(repo_path / "a/g")
-    cli.check(repo_path / "a/.shasum")
+    with assert_nullipotent(repo_path):
+        cli.link(base_legacy / "a", repo_path / "a")
 
-    # Tamper with data
-    del index[pathlib.Path("g")]
-    cli._write_shasum_index(repo_path / "a/.shasum", index)
-    # Run checks
-    with pytest.raises(cli.NotOkError):
-        cli.check(repo_path)
-    with pytest.raises(cli.NotOkError):
-        cli.check(repo_path / "a/g")
-    with pytest.raises(cli.NotOkError):
-        cli.check(repo_path / "a/.shasum")  # TODO: Should this fail or pass?
-    # Restore data
-    index[pathlib.Path("g")] = old
-    cli._write_shasum_index(repo_path / "a/.shasum", index)
+
+def test_track_is_idempotent(tmp_path, base_legacy):
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    cli.link(base_legacy / "a", repo_path / "a")
+    cli.track(repo_path)
+
+    with assert_nullipotent(repo_path):
+        cli.track(repo_path)
+
+
+def test_check_on_clean_repo(base_repo):
+    with assert_nullipotent(base_repo):
+        cli.check(base_repo)
+        cli.check(base_repo / "a/g")
+        cli.check(base_repo / "a/h")
+        cli.check(base_repo / "a/.shasum")
+
+        # Check should ignore paths that are not links
+        # Will happen if not all paths in repo are links
+        cli.check(base_repo / "a/reg")
+        cli.check(base_repo / "a/dir")
+
+        # Will happen if
+        # * was link and has been deleted from repo and index,
+        # * was other type and has been deleted (never in index)
+        cli.check(base_repo / "a/dir/bad")
+        # cli.check(base_repo / "a/dir/.shasum")  #FIXME
+
+
+def test_check_modified_tgt(base_repo):
+    # Equivalent to modifying entry in index
+    (base_repo / "a/g").resolve().write_text("stone")
+
+    with assert_nullipotent(base_repo):
+        with pytest.raises(cli.NotOkError):
+            cli.check(base_repo)
+        with pytest.raises(cli.NotOkError):
+            cli.check(base_repo / "a/g")
+        with pytest.raises(cli.NotOkError):
+            cli.check(base_repo / "a/.shasum")
+
+        # One invalid link should not impact ability to validate on work on other files
+        cli.check(base_repo / "a/reg")
+        cli.check(base_repo / "a/dir")
+        cli.check(base_repo / "a/dir/bad")
+        cli.check(base_repo / "a/e/f")
+        cli.check(base_repo / "a/e/.shasum")
+        cli.check(base_repo / "a/h")
+
+
+def test_check_deleted_tgt(base_repo):
+    (base_repo / "a/g").resolve().unlink()
+
+    with assert_nullipotent(base_repo):
+        cli.check(base_repo)  # FIXME
+        with pytest.raises(RuntimeError):  # FIXME
+            cli.check(base_repo / "a/g")
+        cli.check(base_repo / "a/.shasum")  # FIXME
+
+        # One invalid link should not impact ability to validate on work on other files
+        cli.check(base_repo / "a/reg")
+        cli.check(base_repo / "a/dir")
+        cli.check(base_repo / "a/dir/bad")
+        cli.check(base_repo / "a/e/f")
+        cli.check(base_repo / "a/e/.shasum")
+        cli.check(base_repo / "a/h")
+
+
+def test_check_deleted_lnk(base_repo):
+    # Equivalent to adding entry in index
+    (base_repo / "a/g").unlink()
+
+    with assert_nullipotent(base_repo):
+        cli.check(base_repo)  # FIXME
+        cli.check(base_repo / "a/g")  # FIXME
+        cli.check(base_repo / "a/.shasum")  # FIXME
+
+        # One invalid link should not impact ability to validate on work on other files
+        cli.check(base_repo / "a/reg")
+        cli.check(base_repo / "a/dir")
+        cli.check(base_repo / "a/dir/bad")
+        cli.check(base_repo / "a/e/f")
+        cli.check(base_repo / "a/e/.shasum")
+        cli.check(base_repo / "a/h")
+
+
+def test_check_added_lnk(base_repo):
+    # Equivalent to deleting entry in index
+    g = base_repo / "a/g"
+    x = base_repo / "a/x"
+    x.symlink_to(g.resolve())
+
+    with assert_nullipotent(base_repo):
+        with pytest.raises(cli.NotOkError):
+            cli.check(base_repo)
+        with pytest.raises(cli.NotOkError):
+            cli.check(base_repo / "a/x")
+        with pytest.raises(cli.NotOkError):
+            cli.check(base_repo / "a/.shasum")
+
+        # One invalid link should not impact ability to validate on work on other files
+        cli.check(base_repo / "a/reg")
+        cli.check(base_repo / "a/dir")
+        cli.check(base_repo / "a/dir/bad")
+        cli.check(base_repo / "a/e/f")
+        cli.check(base_repo / "a/e/.shasum")
+        cli.check(base_repo / "a/h")
+
+
+def test_check_added_lnk_new_dir(base_repo):
+    # Equivalent to deleting index
+
+    # Removing index is easier to implement than adding a new dir with files but the
+    # current test name makes it easier relating this test to other tests.
+    (base_repo / "a/.shasum").unlink()
+
+    with assert_nullipotent(base_repo):
+        with pytest.raises(FileNotFoundError):  # TODO
+            cli.check(base_repo)
+        with pytest.raises(FileNotFoundError):  # TODO
+            cli.check(base_repo / "a/g")
+        with pytest.raises(FileNotFoundError):  # TODO
+            cli.check(base_repo / "a/h")
+        with pytest.raises(FileNotFoundError):  # TODO
+            cli.check(base_repo / "a/.shasum")  # FIXME
+
+        # One invalid link should not impact ability to validate on work on other files
+        cli.check(base_repo / "a/reg")
+        cli.check(base_repo / "a/dir")
+        cli.check(base_repo / "a/dir/bad")
+        cli.check(base_repo / "a/e/f")
+        cli.check(base_repo / "a/e/.shasum")
 
 
 def test_workflow_cli(tmp_path):
