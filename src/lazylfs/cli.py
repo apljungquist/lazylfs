@@ -1,12 +1,19 @@
 from __future__ import annotations
 
-import glob
 import hashlib
 import logging
 import os
 import pathlib
 import sys
-from typing import Union, TYPE_CHECKING, Collection, Dict, Set
+from typing import (
+    Union,
+    TYPE_CHECKING,
+    Collection,
+    Dict,
+    Set,
+    Tuple,
+    Iterator,
+)
 
 from sprig import dictutils  # type: ignore
 
@@ -64,60 +71,93 @@ def _update_shasum_index(path: pathlib.Path, files: Collection[pathlib.Path]) ->
     _write_shasum_index(path, {**previous_index, **marginal_index})
 
 
-def _check_shasum_index(path: pathlib.Path, files: Collection[pathlib.Path]) -> bool:
+def _check_link(link_path: pathlib.Path) -> bool:
+    _logger.debug("Checking link %s", str(link_path))
+
+    top = link_path.parent
+    index_path = top / _INDEX_NAME
+
+    try:
+        index = _read_shasum_index(index_path)
+    except FileNotFoundError:
+        if link_path.exists():
+            _logger.info("NOK because no index for link")
+            return False
+        else:
+            return True
+
+    try:
+        expected = index[link_path.relative_to(top)]
+    except KeyError:
+        if link_path.exists():
+            _logger.info("NOK because link not in index")
+            return False
+        else:
+            return True
+
+    try:
+        actual = _sha256(link_path)
+    except FileNotFoundError:
+        _logger.info("NOK because link does not exist")
+        return False
+
+    if actual != expected:
+        _logger.info("NOK because checksum mismatch for link")
+        return False
+
+    return True
+
+
+def _check_index(index_path: pathlib.Path) -> bool:
+    _logger.debug("Checking index %s", str(index_path))
+
     ok = True
-    top = path.parent
-    previous_index = _read_shasum_index(path)
-    previous_tails = set(previous_index)
+    top = index_path.parent
 
-    current_tails = {file.relative_to(top) for file in files}
+    try:
+        index = _read_shasum_index(index_path)
+    except FileNotFoundError:
+        index = {}
 
-    unchecked_tails = previous_tails - current_tails
-    if unchecked_tails:
-        _logger.info("%s tracked file(s) not included", len(unchecked_tails))
-        for tail in sorted(unchecked_tails):
-            _logger.debug("Not checked for %s", str(tail))
-
-    untracked_tails = current_tails - previous_tails
-    if untracked_tails:
-        _logger.info("%s included file(s) not tracked", len(untracked_tails))
-        ok = False
-        for tail in sorted(untracked_tails):
-            _logger.debug("Not tracked for %s", str(tail))
-
-    common_tails = previous_tails & current_tails
-    for tail in common_tails:
-        expected = previous_index[tail]
+    for name, expected in index.items():
+        link_path = top / name
         try:
-            actual = _sha256(top / tail)
+            actual = _sha256(link_path)
         except FileNotFoundError:
-            _logger.warning("Could not check %s", str(top / tail))
+            _logger.info("NOK because link does not exist")
             ok = False
             continue
 
         if actual != expected:
-            _logger.info("Checksum mismatch for %s", str(top / tail))
-            _logger.info("Actual:   %s", actual)
-            _logger.info("Expected: %s", expected)
+            _logger.info("NOK because checksum mismatch for link")
             ok = False
+
+    existing = set(
+        path.relative_to(top)
+        for path in top.iterdir()
+        if path.is_symlink() and not path.is_dir()
+    )
+    untracked = existing - set(index)
+    if untracked:
+        _logger.info("NOK because untracked links")
+        ok = False
 
     return ok
 
 
-def _find_links(includes: Collection[PathT]) -> Set[pathlib.Path]:
-    included: Set[pathlib.Path] = set()
-    for include in includes:
-        for path in glob.glob(str(include)):
-            if os.path.isdir(path):
-                # `glob.glob("**", recursive=True)` does not play nice with symlink loops
-                files = filter(os.path.isfile, pathlib.Path(path).rglob("*"))
-            elif os.path.isfile(path):
-                files = iter([pathlib.Path(path)])
-            else:
-                raise RuntimeError("Unexpected path type")
+def _collect_paths(includes: Tuple[str, ...]) -> Set[pathlib.Path]:
+    if not includes:
+        includes = tuple([line.rstrip() for line in sys.stdin.readlines()])
 
-            included.update(file for file in files if os.path.islink(file))
+    included: Set[pathlib.Path] = set()
+    for top in includes:
+        included.update(_find(pathlib.Path(top)))
     return included
+
+
+def _find(top: pathlib.Path) -> Iterator[pathlib.Path]:
+    yield top
+    yield from top.rglob("*")
 
 
 def link(src: PathT, dst: PathT) -> None:
@@ -156,9 +196,16 @@ def link(src: PathT, dst: PathT) -> None:
         dst_path.symlink_to(src_path)
 
 
-def track(*includes: PathT) -> None:
+def track(*includes: str) -> None:
     """Track the checksum of files in the index"""
-    batches = dictutils.group_by(_find_links(includes), lambda path: path.parent)
+    _track(_collect_paths(includes))
+
+
+def _track(paths: Set[pathlib.Path]) -> None:
+    batches = dictutils.group_by(
+        (path for path in paths if path.is_symlink() and path.is_file()),
+        lambda path: path.parent,
+    )
     for dir, files in batches.items():
         _update_shasum_index(dir / _INDEX_NAME, files)
 
@@ -167,31 +214,27 @@ class NotOkError(Exception):
     pass
 
 
-def check(*includes: PathT) -> None:
+def check(*includes: str) -> None:
     """Check the checksum of files against the index
 
     Exit with non-zero status if a difference is detected or a file could not be
     checked.
     """
-    if not includes:
-        includes = tuple([line.rstrip() for line in sys.stdin.readlines()])
+    _check(_collect_paths(includes))
 
-    batches = dictutils.group_by(_find_links(includes), lambda path: path.parent)
+
+def _check(paths: Set[pathlib.Path]) -> None:
     ok = True
-    for dir, files in batches.items():
-        ok &= _check_shasum_index(dir / _INDEX_NAME, files)
 
-    for path in includes:
-        path = pathlib.Path(path)
+    for path in paths:
         if path.name == _INDEX_NAME:
-            ok &= _check_shasum_index(
-                path,
-                [
-                    link
-                    for link in path.parent.iterdir()
-                    if link.is_file() and link.is_symlink()
-                ],
-            )
+            if path.exists() and (path.is_symlink() or not path.is_file()):
+                raise ValueError("Non-regular file named like index file")
+            ok &= _check_index(path)
+        elif not path.exists() or (path.is_symlink() and not path.is_dir()):
+            ok &= _check_link(path)
+        else:
+            _logger.debug("Ignoring path %s", str(path))
 
     if not ok:
         raise NotOkError

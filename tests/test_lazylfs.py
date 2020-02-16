@@ -179,7 +179,7 @@ def test_check_on_clean_repo(base_repo):
         # * was link and has been deleted from repo and index,
         # * was other type and has been deleted (never in index)
         cli.check(base_repo / "a/dir/bad")
-        # cli.check(base_repo / "a/dir/.shasum")  #FIXME
+        cli.check(base_repo / "a/dir/.shasum")
 
 
 def test_check_modified_tgt(base_repo):
@@ -207,10 +207,12 @@ def test_check_deleted_tgt(base_repo):
     (base_repo / "a/g").resolve().unlink()
 
     with assert_nullipotent(base_repo):
-        cli.check(base_repo)  # FIXME
-        with pytest.raises(RuntimeError):  # FIXME
+        with pytest.raises(cli.NotOkError):
+            cli.check(base_repo)
+        with pytest.raises(cli.NotOkError):
             cli.check(base_repo / "a/g")
-        cli.check(base_repo / "a/.shasum")  # FIXME
+        with pytest.raises(cli.NotOkError):
+            cli.check(base_repo / "a/.shasum")
 
         # One invalid link should not impact ability to validate on work on other files
         cli.check(base_repo / "a/reg")
@@ -226,9 +228,12 @@ def test_check_deleted_lnk(base_repo):
     (base_repo / "a/g").unlink()
 
     with assert_nullipotent(base_repo):
-        cli.check(base_repo)  # FIXME
-        cli.check(base_repo / "a/g")  # FIXME
-        cli.check(base_repo / "a/.shasum")  # FIXME
+        with pytest.raises(cli.NotOkError):
+            cli.check(base_repo)
+        with pytest.raises(cli.NotOkError):
+            cli.check(base_repo / "a/g")
+        with pytest.raises(cli.NotOkError):
+            cli.check(base_repo / "a/.shasum")
 
         # One invalid link should not impact ability to validate on work on other files
         cli.check(base_repo / "a/reg")
@@ -270,14 +275,14 @@ def test_check_added_lnk_new_dir(base_repo):
     (base_repo / "a/.shasum").unlink()
 
     with assert_nullipotent(base_repo):
-        with pytest.raises(FileNotFoundError):  # TODO
+        with pytest.raises(cli.NotOkError):
             cli.check(base_repo)
-        with pytest.raises(FileNotFoundError):  # TODO
+        with pytest.raises(cli.NotOkError):
             cli.check(base_repo / "a/g")
-        with pytest.raises(FileNotFoundError):  # TODO
+        with pytest.raises(cli.NotOkError):
             cli.check(base_repo / "a/h")
-        with pytest.raises(FileNotFoundError):  # TODO
-            cli.check(base_repo / "a/.shasum")  # FIXME
+        with pytest.raises(cli.NotOkError):
+            cli.check(base_repo / "a/.shasum")
 
         # One invalid link should not impact ability to validate on work on other files
         cli.check(base_repo / "a/reg")
