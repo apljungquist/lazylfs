@@ -138,11 +138,13 @@ def test_link_fails_if_existing_and_different(tmp_path, base_legacy, create_path
     repo_path.mkdir()
     create_path(repo_path / "a/g")
 
+    with pytest.raises(FileExistsError):
+        cli.link(base_legacy / "a", repo_path / "a")
+
     with assert_nullipotent(repo_path), pytest.raises(FileExistsError):
         cli.link(base_legacy / "a", repo_path / "a")
 
 
-@pytest.mark.xfail(strict=True)  # FIXME
 def test_link_skips_if_existing_and_same(tmp_path, base_legacy):
     # This enables idempotency
     repo_path = tmp_path / "repo"

@@ -204,22 +204,22 @@ def link(src: PathT, dst: PathT, crud: str = "cr") -> None:
     src_tails = {
         pathlib.Path(path).relative_to(src) for path in src.rglob("*") if _is_reg(path)
     }
-    dst_tails = {path.relative_to(dst) for path in dst.rglob("*")}
-
-    conflicts = src_tails & dst_tails
-    if conflicts:
-        for tail in conflicts:
-            _logger.debug("Path already exist in the destination: %s", str(tail))
-        raise FileExistsError("Some paths already exist in the destination")
 
     dst.mkdir(exist_ok=True)
 
-    new = src_tails - dst_tails
-    for tail in sorted(new):
+    for tail in sorted(src_tails):
         src_path = src / tail
         dst_path = dst / tail
         dst_path.parent.mkdir(parents=True, exist_ok=True)
         _logger.debug("Linking %s", str(tail))
+
+        if dst_path.is_symlink() and os.readlink(dst_path) == os.fspath(src_path):
+            _logger.debug("Path exists and is equivalent, skipping")
+            continue
+
+        if dst_path.is_symlink() or dst_path.exists():
+            raise FileExistsError
+
         dst_path.symlink_to(src_path)
 
 
