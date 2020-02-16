@@ -25,6 +25,29 @@ if TYPE_CHECKING:
 _INDEX_NAME = ".shasum"
 
 
+# Aliases for file mode combinations to allow filters to be expressed as easy to read
+# disjunctions. More to come when needed, primarily is_dir and is_lnk_dir.
+
+
+def _is_bad(path: pathlib.Path) -> bool:
+    return not path.exists() and not path.is_symlink()
+
+
+def _is_reg(path: pathlib.Path) -> bool:
+    """Path is regular file"""
+    return path.is_file() and not path.is_symlink()
+
+
+def _is_lnk_bad(path: pathlib.Path) -> bool:
+    """Path is dangling symlink"""
+    return path.is_symlink() and not path.exists()
+
+
+def _is_lnk_reg(path: pathlib.Path) -> bool:
+    """"Path symlink to regular file"""
+    return path.is_symlink() and path.is_file()
+
+
 def _sha256(path: pathlib.Path) -> str:
     h = hashlib.sha256()
     b = bytearray(128 * 1024)
@@ -135,7 +158,7 @@ def _check_index(index_path: pathlib.Path) -> bool:
     existing = set(
         path.relative_to(top)
         for path in top.iterdir()
-        if path.is_symlink() and not path.is_dir()
+        if _is_lnk_reg(path) or _is_lnk_bad(path)
     )
     untracked = existing - set(index)
     if untracked:
@@ -173,9 +196,7 @@ def link(src: PathT, dst: PathT) -> None:
         raise ValueError("Expected src to be a directory")
 
     src_tails = {
-        pathlib.Path(path).relative_to(src)
-        for path in src.rglob("*")
-        if path.is_file() and not path.is_symlink()
+        pathlib.Path(path).relative_to(src) for path in src.rglob("*") if _is_reg(path)
     }
     dst_tails = {path.relative_to(dst) for path in dst.rglob("*")}
 
@@ -203,8 +224,7 @@ def track(*includes: str) -> None:
 
 def _track(paths: Set[pathlib.Path]) -> None:
     batches = dictutils.group_by(
-        (path for path in paths if path.is_symlink() and path.is_file()),
-        lambda path: path.parent,
+        (path for path in paths if _is_lnk_reg(path)), lambda path: path.parent,
     )
     for dir, files in batches.items():
         _update_shasum_index(dir / _INDEX_NAME, files)
@@ -228,10 +248,11 @@ def _check(paths: Set[pathlib.Path]) -> None:
 
     for path in paths:
         if path.name == _INDEX_NAME:
-            if path.exists() and (path.is_symlink() or not path.is_file()):
+            if _is_reg(path) or _is_bad(path):
+                ok &= _check_index(path)
+            else:
                 raise ValueError("Non-regular file named like index file")
-            ok &= _check_index(path)
-        elif not path.exists() or (path.is_symlink() and not path.is_dir()):
+        elif _is_lnk_reg(path) or _is_lnk_bad(path) or _is_bad(path):
             ok &= _check_link(path)
         else:
             _logger.debug("Ignoring path %s", str(path))
