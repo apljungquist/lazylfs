@@ -307,7 +307,7 @@ def test_workflow_cli(tmp_path):
     assert not run(base_cmd + ["track", str(repo_path)]).stdout
     assert not run(base_cmd + ["check", str(repo_path)]).stdout
     assert not run(
-        base_cmd + ["check", "'-'"],
+        base_cmd + ["check"],
         input="\n".join(map(str, (path for path in repo_path.rglob("*")))),
     ).stdout
 
@@ -320,7 +320,7 @@ def test_workflow_cli(tmp_path):
     assert proc.returncode
 
     proc = subprocess.run(
-        base_cmd + ["check", "'-'"],
+        base_cmd + ["check"],
         capture_output=True,
         text=True,
         input="\n".join(map(str, (path for path in repo_path.rglob("*")))),

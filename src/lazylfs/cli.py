@@ -173,7 +173,7 @@ def check(*includes: PathT) -> None:
     Exit with non-zero status if a difference is detected or a file could not be
     checked.
     """
-    if len(includes) == 1 and includes[0] == "-":
+    if not includes:
         includes = tuple([line.rstrip() for line in sys.stdin.readlines()])
 
     batches = dictutils.group_by(_find_links(includes), lambda path: path.parent)
