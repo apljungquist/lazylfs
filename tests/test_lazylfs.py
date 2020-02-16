@@ -118,7 +118,7 @@ def base_repo(tmp_path, base_legacy):
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
     cli.link(base_legacy / "a", repo_path / "a")
-    cli.track(repo_path)
+    cli.track(repo_path, crud="cru")
 
     (repo_path / "a/reg").touch()
     (repo_path / "a/dir").mkdir()
@@ -157,10 +157,10 @@ def test_track_is_idempotent(tmp_path, base_legacy):
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
     cli.link(base_legacy / "a", repo_path / "a")
-    cli.track(repo_path)
+    cli.track(repo_path, crud="cru")
 
     with assert_nullipotent(repo_path):
-        cli.track(repo_path)
+        cli.track(repo_path, crud="cru")
 
 
 def test_check_on_clean_repo(base_repo):
@@ -309,7 +309,7 @@ def test_workflow_cli(tmp_path):
     assert not run(
         base_cmd + ["link", str(legacy_path / "a"), str(repo_path / "a")]
     ).stdout
-    assert not run(base_cmd + ["track", str(repo_path)]).stdout
+    assert not run(base_cmd + ["track", str(repo_path), "--crud=cru"]).stdout
     assert not run(base_cmd + ["check", str(repo_path)]).stdout
     assert not run(
         base_cmd + ["check"],

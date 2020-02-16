@@ -183,12 +183,18 @@ def _find(top: pathlib.Path) -> Iterator[pathlib.Path]:
     yield from top.rglob("*")
 
 
-def link(src: PathT, dst: PathT) -> None:
+def link(src: PathT, dst: PathT, crud: str = "cr") -> None:
     """Create links in `dst` to the corresponding files in `src`
 
     :param src: Directory under which to look for files
     :param dst: Directory under which to create symlinks
     """
+    if set(crud) - set("crud"):
+        raise ValueError("Unexpected permissions given")
+
+    if set("cr") - set(crud):
+        raise NotImplementedError("Must be allowed to create and read")
+
     src = pathlib.Path(src).resolve()
     dst = pathlib.Path(dst).resolve()
 
@@ -217,8 +223,14 @@ def link(src: PathT, dst: PathT) -> None:
         dst_path.symlink_to(src_path)
 
 
-def track(*includes: str) -> None:
+def track(*includes: str, crud: str = "cr") -> None:
     """Track the checksum of files in the index"""
+    if set(crud) - set("crud"):
+        raise ValueError("Unexpected permissions given")
+
+    if set("cru") - set(crud):
+        raise NotImplementedError("Must be allowed to create, read, and update")
+
     _track(_collect_paths(includes))
 
 
@@ -234,12 +246,18 @@ class NotOkError(Exception):
     pass
 
 
-def check(*includes: str) -> None:
+def check(*includes: str, crud: str = "cr") -> None:
     """Check the checksum of files against the index
 
     Exit with non-zero status if a difference is detected or a file could not be
     checked.
     """
+    if set(crud) - set("crud"):
+        raise ValueError("Unexpected permissions given")
+
+    if set("r") - set(crud):
+        raise NotImplementedError("Must be allowed to read")
+
     _check(_collect_paths(includes))
 
 
