@@ -24,7 +24,7 @@ git init .
 
 lazylfs link path/to/data/ ./
 
-lazylfs track ./ --crud=cru
+lazylfs track ./
 
 lazylfs check ./
 
