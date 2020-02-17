@@ -9,14 +9,11 @@ import sys
 from typing import (
     Union,
     TYPE_CHECKING,
-    Collection,
     Dict,
     Set,
     Tuple,
     Iterator,
 )
-
-from sprig import dictutils  # type: ignore
 
 _logger = logging.getLogger(__name__)
 
@@ -33,29 +30,6 @@ class ConflictResolution(enum.Enum):
 _INDEX_NAME = ".shasum"
 
 
-# Aliases for file mode combinations to allow filters to be expressed as easy to read
-# disjunctions. More to come when needed, primarily is_dir and is_lnk_dir.
-
-
-def _is_bad(path: pathlib.Path) -> bool:
-    return not path.exists() and not path.is_symlink()
-
-
-def _is_reg(path: pathlib.Path) -> bool:
-    """Path is regular file"""
-    return path.is_file() and not path.is_symlink()
-
-
-def _is_lnk_bad(path: pathlib.Path) -> bool:
-    """Path is dangling symlink"""
-    return path.is_symlink() and not path.exists()
-
-
-def _is_lnk_reg(path: pathlib.Path) -> bool:
-    """"Path symlink to regular file"""
-    return path.is_symlink() and path.is_file()
-
-
 def _sha256(path: pathlib.Path) -> str:
     h = hashlib.sha256()
     b = bytearray(128 * 1024)
@@ -66,84 +40,81 @@ def _sha256(path: pathlib.Path) -> str:
     return h.hexdigest()
 
 
-def _read_shasum_index(path: pathlib.Path) -> Dict[pathlib.Path, str]:
+def _read_shasum_index(path: pathlib.Path) -> Dict[str, str]:
     split_lines = (line.split() for line in path.read_text().splitlines())
-    return {pathlib.Path(line[-1]): line[0] for line in split_lines}
+    return {line[-1]: line[0] for line in split_lines}
 
 
-def _write_shasum_index(path: pathlib.Path, index: Dict[pathlib.Path, str]) -> None:
+def _write_shasum_index(path: pathlib.Path, index: Dict[str, str]) -> None:
     path.write_text("".join(sorted(f"{v}  {k}\n" for k, v in index.items())))
 
 
-def _update_shasum_index(path: pathlib.Path, files: Collection[pathlib.Path]) -> None:
-    top = path.parent
-    try:
-        previous_index = _read_shasum_index(path)
-    except FileNotFoundError:
-        previous_index = {}
-    previous_tails = set(previous_index)
-
-    current_tails = {file.relative_to(top) for file in files}
-
-    if previous_tails & current_tails:
-        _logger.info("Some files are already indexed, skipping")
-
-    if previous_tails - current_tails:
-        _logger.info("Some indexed files are gone, preserving")
-
-    marginal_tails = current_tails - previous_tails
-    if not marginal_tails:
-        _logger.info("No files need to be indexed")
+def _update_shasum_index(link_path: pathlib.Path) -> None:
+    if not _should_be_indexed(link_path):
         return
 
-    _logger.debug("Indexing %s files", len(marginal_tails))
-    marginal_index = {tail: _sha256(top / tail) for tail in marginal_tails}
+    if _is_indexed(link_path):
+        if _matches_indexed(link_path):
+            return
+        else:
+            raise PermissionError("Refusing cowardly to overwrite information")
 
-    _write_shasum_index(path, {**previous_index, **marginal_index})
+    index_path = link_path.parent / _INDEX_NAME
+    try:
+        index = _read_shasum_index(index_path)
+    except FileNotFoundError:
+        index = {}
+
+    index[link_path.name] = _sha256(link_path)
+    _write_shasum_index(index_path, index)
 
 
 def _check_link(link_path: pathlib.Path) -> bool:
     _logger.debug("Checking link %s", str(link_path))
+    if _should_be_indexed(link_path):
+        if _is_indexed(link_path):
+            if _matches_indexed(link_path):
+                return True
+            else:
+                _logger.debug("NOK because link does not match index")
+                return False
+        else:
+            _logger.debug("NOK because link is not indexed")
+            return False
+    else:
+        if _is_indexed(link_path):
+            _logger.debug("NOK because should not be indexed")
+            return False
+        else:
+            return True
 
-    top = link_path.parent
-    index_path = top / _INDEX_NAME
+
+def _should_be_indexed(link_path: pathlib.Path) -> bool:
+    return link_path.is_symlink() and link_path.is_file()
+
+
+def _is_indexed(link_path: pathlib.Path) -> bool:
+    index_path = link_path.parent / _INDEX_NAME
 
     try:
         index = _read_shasum_index(index_path)
     except FileNotFoundError:
-        if link_path.exists():
-            _logger.info("NOK because no index for link")
-            return False
-        else:
-            return True
-
-    try:
-        expected = index[link_path.relative_to(top)]
-    except KeyError:
-        if link_path.exists():
-            _logger.info("NOK because link not in index")
-            return False
-        else:
-            return True
-
-    try:
-        actual = _sha256(link_path)
-    except FileNotFoundError:
-        _logger.info("NOK because link does not exist")
         return False
+    return link_path.name in index
 
-    if actual != expected:
-        _logger.info("NOK because checksum mismatch for link")
-        return False
 
-    return True
+def _matches_indexed(link_path: pathlib.Path) -> bool:
+    index_path = link_path.parent / _INDEX_NAME
+
+    index = _read_shasum_index(index_path)
+    expected = index[link_path.name]
+    actual = _sha256(link_path)
+    return actual == expected
 
 
 def _check_index(index_path: pathlib.Path) -> bool:
     _logger.debug("Checking index %s", str(index_path))
-
     ok = True
-    top = index_path.parent
 
     try:
         index = _read_shasum_index(index_path)
@@ -151,27 +122,22 @@ def _check_index(index_path: pathlib.Path) -> bool:
         index = {}
 
     for name, expected in index.items():
-        link_path = top / name
+        link_path = index_path.parent / name
         try:
             actual = _sha256(link_path)
         except FileNotFoundError:
-            _logger.info("NOK because link does not exist")
+            _logger.info("NOK because link does not exist: %s", link_path.name)
             ok = False
             continue
 
         if actual != expected:
-            _logger.info("NOK because checksum mismatch for link")
+            _logger.info("NOK because link does not match: %s", link_path.name)
             ok = False
 
-    existing = set(
-        path.relative_to(top)
-        for path in top.iterdir()
-        if _is_lnk_reg(path) or _is_lnk_bad(path)
-    )
-    untracked = existing - set(index)
-    if untracked:
-        _logger.info("NOK because untracked links")
-        ok = False
+    for link_path in sorted(index_path.parent.iterdir()):
+        if _should_be_indexed(link_path) and link_path.name not in index:
+            _logger.info("NOK because link is not indexed")
+            ok = False
 
     return ok
 
@@ -212,7 +178,9 @@ def link(
         raise ValueError("Expected src to be a directory")
 
     src_tails = {
-        pathlib.Path(path).relative_to(src) for path in src.rglob("*") if _is_reg(path)
+        pathlib.Path(path).relative_to(src)
+        for path in src.rglob("*")
+        if path.is_file() and not path.is_symlink()
     }
 
     dst.mkdir(exist_ok=True)
@@ -246,11 +214,8 @@ def track(
 
 
 def _track(paths: Set[pathlib.Path]) -> None:
-    batches = dictutils.group_by(
-        (path for path in paths if _is_lnk_reg(path)), lambda path: path.parent,
-    )
-    for dir, files in batches.items():
-        _update_shasum_index(dir / _INDEX_NAME, files)
+    for path in paths:
+        _update_shasum_index(path)
 
 
 class NotOkError(Exception):
@@ -278,14 +243,9 @@ def _check(paths: Set[pathlib.Path]) -> None:
 
     for path in paths:
         if path.name == _INDEX_NAME:
-            if _is_reg(path) or _is_bad(path):
-                ok &= _check_index(path)
-            else:
-                raise ValueError("Non-regular file named like index file")
-        elif _is_lnk_reg(path) or _is_lnk_bad(path) or _is_bad(path):
-            ok &= _check_link(path)
+            ok &= _check_index(path)
         else:
-            _logger.debug("Ignoring path %s", str(path))
+            ok &= _check_link(path)
 
     if not ok:
         raise NotOkError
