@@ -90,7 +90,11 @@ def _check_link(link_path: pathlib.Path) -> bool:
 
 
 def _should_be_indexed(link_path: pathlib.Path) -> bool:
-    return link_path.is_symlink() and link_path.is_file()
+    return (
+        link_path.is_symlink()
+        and link_path.is_file()
+        and os.path.isabs(os.readlink(link_path))
+    )
 
 
 def _is_indexed(link_path: pathlib.Path) -> bool:
