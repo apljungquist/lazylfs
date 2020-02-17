@@ -49,44 +49,68 @@ def _write_shasum_index(path: pathlib.Path, index: Dict[str, str]) -> None:
     path.write_text("".join(sorted(f"{v}  {k}\n" for k, v in index.items())))
 
 
-def _update_shasum_index(link_path: pathlib.Path) -> None:
-    if not _should_be_indexed(link_path):
-        return
+class ShasumIntegrityIndex:
+    def __contains__(self, link_path: pathlib.Path) -> bool:
+        try:
+            self[link_path]
+        except KeyError:
+            return False
+        return True
 
-    if _is_indexed(link_path):
-        if _matches_indexed(link_path):
-            return
-        else:
-            raise PermissionError("Refusing cowardly to overwrite information")
+    def __getitem__(self, link_path: pathlib.Path) -> str:
+        try:
+            index = _read_shasum_index(link_path.parent / _INDEX_NAME)
+        except FileNotFoundError as e:
+            raise KeyError from e
+        return index[link_path.name]
 
-    index_path = link_path.parent / _INDEX_NAME
-    try:
-        index = _read_shasum_index(index_path)
-    except FileNotFoundError:
-        index = {}
+    def __setitem__(self, link_path: pathlib.Path, new: str) -> None:
+        index_filepath = link_path.parent / _INDEX_NAME
+        key = link_path.name
+        try:
+            index = _read_shasum_index(index_filepath)
+        except FileNotFoundError:
+            index = {}
 
-    index[link_path.name] = _sha256(link_path)
-    _write_shasum_index(index_path, index)
-
-
-def _check_link(link_path: pathlib.Path) -> bool:
-    _logger.debug("Checking link %s", str(link_path))
-    if _should_be_indexed(link_path):
-        if _is_indexed(link_path):
-            if _matches_indexed(link_path):
-                return True
+        if key in index:
+            if index[key] == new:
+                return
             else:
-                _logger.debug("NOK because link does not match index")
+                raise PermissionError
+
+        index[key] = self.calc_checksum(link_path)
+        _write_shasum_index(index_filepath, index)
+
+    def calc_checksum(self, link_path: pathlib.Path) -> str:
+        return _sha256(link_path)
+
+    def add(self, link_path: pathlib.Path) -> None:
+        checksum = self.calc_checksum(link_path)
+        self[link_path] = checksum
+
+    def check(self, index_filepath: pathlib.Path) -> bool:
+        try:
+            index = _read_shasum_index(index_filepath)
+        except FileNotFoundError:
+            index = {}
+
+        actual_keys = set(index)
+        expected_keys = set(
+            path.name
+            for path in index_filepath.parent.iterdir()
+            if _should_be_indexed(path)
+        )
+
+        if actual_keys != expected_keys:
+            return False
+
+        for key, expected_checksum in index.items():
+            link_path = index_filepath.parent / key
+            actual_checksum = self.calc_checksum(link_path)
+            if actual_checksum != expected_checksum:
                 return False
-        else:
-            _logger.debug("NOK because link is not indexed")
-            return False
-    else:
-        if _is_indexed(link_path):
-            _logger.debug("NOK because should not be indexed")
-            return False
-        else:
-            return True
+
+        return True
 
 
 def _should_be_indexed(link_path: pathlib.Path) -> bool:
@@ -95,55 +119,6 @@ def _should_be_indexed(link_path: pathlib.Path) -> bool:
         and link_path.is_file()
         and os.path.isabs(os.readlink(link_path))
     )
-
-
-def _is_indexed(link_path: pathlib.Path) -> bool:
-    index_path = link_path.parent / _INDEX_NAME
-
-    try:
-        index = _read_shasum_index(index_path)
-    except FileNotFoundError:
-        return False
-    return link_path.name in index
-
-
-def _matches_indexed(link_path: pathlib.Path) -> bool:
-    index_path = link_path.parent / _INDEX_NAME
-
-    index = _read_shasum_index(index_path)
-    expected = index[link_path.name]
-    actual = _sha256(link_path)
-    return actual == expected
-
-
-def _check_index(index_path: pathlib.Path) -> bool:
-    _logger.debug("Checking index %s", str(index_path))
-    ok = True
-
-    try:
-        index = _read_shasum_index(index_path)
-    except FileNotFoundError:
-        index = {}
-
-    for name, expected in index.items():
-        link_path = index_path.parent / name
-        try:
-            actual = _sha256(link_path)
-        except FileNotFoundError:
-            _logger.info("NOK because link does not exist: %s", link_path.name)
-            ok = False
-            continue
-
-        if actual != expected:
-            _logger.info("NOK because link does not match: %s", link_path.name)
-            ok = False
-
-    for link_path in sorted(index_path.parent.iterdir()):
-        if _should_be_indexed(link_path) and link_path.name not in index:
-            _logger.info("NOK because link is not indexed")
-            ok = False
-
-    return ok
 
 
 def _collect_paths(includes: Tuple[str, ...]) -> Set[pathlib.Path]:
@@ -218,8 +193,10 @@ def track(
 
 
 def _track(paths: Set[pathlib.Path]) -> None:
+    index = ShasumIntegrityIndex()
     for path in paths:
-        _update_shasum_index(path)
+        if _should_be_indexed(path):
+            index.add(path)
 
 
 class NotOkError(Exception):
@@ -244,12 +221,21 @@ def check(
 
 def _check(paths: Set[pathlib.Path]) -> None:
     ok = True
-
+    index = ShasumIntegrityIndex()
     for path in paths:
         if path.name == _INDEX_NAME:
-            ok &= _check_index(path)
+            if index.check(path):
+                continue
+        elif _should_be_indexed(path):
+            if path in index:
+                if index[path] == index.calc_checksum(path):
+                    continue
         else:
-            ok &= _check_link(path)
+            if path not in index:
+                continue
+
+        ok &= False
+        _logger.debug("NOK %s", path)
 
     if not ok:
         raise NotOkError
