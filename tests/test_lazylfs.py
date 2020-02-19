@@ -6,12 +6,12 @@ This is for pytest to find and stop being upset not finding any tests.
 """
 import contextlib
 import functools
-import hashlib
 import logging
 import os
 import pathlib
 import stat
 import subprocess
+from typing import Dict
 
 import pytest
 
@@ -99,14 +99,7 @@ def _create_tree(
         raise ValueError
 
 
-def _sha256(*data: bytes) -> bytes:
-    h = hashlib.sha256()
-    for datum in data:
-        h.update(datum)
-    return h.digest()
-
-
-def _calc_fingerprint(path: pathlib.Path, recursive: bool) -> bytes:
+def _calc_fingerprint(path: pathlib.Path) -> Dict:
     s = path.lstat()
     # These should be stable, st_atime notably is not
     stable_attrs = [
@@ -116,32 +109,30 @@ def _calc_fingerprint(path: pathlib.Path, recursive: bool) -> bytes:
         "st_mtime",
         "st_ctime",
     ]
-    meta_checksum = _sha256(
-        ",".join(f"{attr}={getattr(s, attr)}" for attr in stable_attrs).encode()
-    )
-
-    if stat.S_ISLNK(s.st_mode):
-        data_checksum = _sha256(os.readlink(path).encode())
+    if stat.S_ISDIR(s.st_mode):
+        return {
+            "content": [_calc_fingerprint(child) for child in path.iterdir()],
+            **{attr: getattr(s, attr) for attr in stable_attrs},
+        }
+    elif stat.S_ISLNK(s.st_mode):
+        return {
+            "content": os.readlink(path),
+            **{attr: getattr(s, attr) for attr in stable_attrs},
+        }
     elif stat.S_ISREG(s.st_mode):
-        data_checksum = _sha256(path.read_bytes())
-    elif stat.S_ISDIR(s.st_mode) and recursive:
-        data_checksum = _sha256(
-            *(
-                _calc_fingerprint(sub, recursive=recursive)
-                for sub in sorted(path.iterdir())
-            )
-        )
+        return {
+            "content": path.read_text(),
+            **{attr: getattr(s, attr) for attr in stable_attrs},
+        }
     else:
-        data_checksum = _sha256(b"")
-
-    return _sha256((meta_checksum + data_checksum))
+        raise ValueError
 
 
 @contextlib.contextmanager
 def assert_nullipotent(path):
-    before = _calc_fingerprint(path, True)
+    before = _calc_fingerprint(path)
     yield
-    after = _calc_fingerprint(path, True)
+    after = _calc_fingerprint(path)
     assert after == before
 
 
