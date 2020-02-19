@@ -11,7 +11,7 @@ import os
 import pathlib
 import stat
 import subprocess
-from typing import Dict
+from typing import Collection, Dict
 
 import pytest
 
@@ -99,30 +99,45 @@ def _create_tree(
         raise ValueError
 
 
-def _calc_fingerprint(path: pathlib.Path) -> Dict:
-    s = path.lstat()
-    # These should be stable, st_atime notably is not
-    stable_attrs = [
-        "st_mode",
-        "st_uid",
-        "st_gid",
-        "st_mtime",
-        "st_ctime",
-    ]
+_SAMEFILE_ATTRS = {
+    "st_ino",
+    "st_dev",
+}
+
+# These should be stable, st_atime notably is not
+_STABLE_ATTRS = {
+    "st_mode",
+    "st_uid",
+    "st_gid",
+    "st_mtime",
+    "st_ctime",
+}
+
+
+def _calc_fingerprint(
+    path: pathlib.Path, follow_symlinks: bool, attrs: Collection[str]
+) -> Dict:
+    if follow_symlinks:
+        s = path.stat()
+    else:
+        s = path.lstat()
     if stat.S_ISDIR(s.st_mode):
         return {
-            "content": [_calc_fingerprint(child) for child in path.iterdir()],
-            **{attr: getattr(s, attr) for attr in stable_attrs},
+            "content": [
+                _calc_fingerprint(child, follow_symlinks, attrs)
+                for child in path.iterdir()
+            ],
+            **{attr: getattr(s, attr) for attr in attrs},
         }
     elif stat.S_ISLNK(s.st_mode):
         return {
             "content": os.readlink(path),
-            **{attr: getattr(s, attr) for attr in stable_attrs},
+            **{attr: getattr(s, attr) for attr in attrs},
         }
     elif stat.S_ISREG(s.st_mode):
         return {
             "content": path.read_text(),
-            **{attr: getattr(s, attr) for attr in stable_attrs},
+            **{attr: getattr(s, attr) for attr in attrs},
         }
     else:
         raise ValueError
@@ -130,9 +145,9 @@ def _calc_fingerprint(path: pathlib.Path) -> Dict:
 
 @contextlib.contextmanager
 def assert_nullipotent(path):
-    before = _calc_fingerprint(path)
+    before = _calc_fingerprint(path, False, _STABLE_ATTRS)
     yield
-    after = _calc_fingerprint(path)
+    after = _calc_fingerprint(path, False, _STABLE_ATTRS)
     assert after == before
 
 
@@ -189,6 +204,45 @@ def test_link_skips_if_existing_and_same(tmp_path, base_legacy):
 
     with assert_nullipotent(repo_path):
         cli.link(base_legacy / "a", repo_path / "a")
+
+
+def test_link_does_not_affect_src(tmp_path, base_legacy):
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+
+    with assert_nullipotent(base_legacy):
+        cli.link(base_legacy / "a", repo_path / "a")
+
+
+def test_common_paths_resolve_to_samefile_after_link(tmp_path, base_legacy):
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    src = base_legacy / "a"
+    dst = repo_path / "a"
+    cli.link(src, dst)
+
+    src_paths = {
+        path.relative_to(src)
+        for path in src.rglob("*")
+        if not stat.S_ISDIR(path.lstat().st_mode)
+    }
+    dst_paths = {
+        path.relative_to(dst)
+        for path in dst.rglob("*")
+        if not stat.S_ISDIR(path.lstat().st_mode)
+    }
+    common_paths = src_paths & dst_paths
+
+    src_fingerprint = {
+        path: _calc_fingerprint(src / path, True, _SAMEFILE_ATTRS)
+        for path in common_paths
+    }
+    dst_fingerprint = {
+        path: _calc_fingerprint(dst / path, True, _SAMEFILE_ATTRS)
+        for path in common_paths
+    }
+
+    assert src_fingerprint == dst_fingerprint
 
 
 def test_track_is_idempotent(tmp_path, base_legacy):
