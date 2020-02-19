@@ -170,9 +170,11 @@ def base_repo(tmp_path, base_legacy):
 def test_link_fails_if_existing_and_different(tmp_path, base_legacy, create_path):
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
-    create_path(repo_path / "a/g")
 
-    with pytest.raises(FileExistsError):
+    existing_path = repo_path / "a/g"
+    create_path(existing_path)
+
+    with assert_nullipotent(existing_path), pytest.raises(FileExistsError):
         cli.link(base_legacy / "a", repo_path / "a")
 
     with assert_nullipotent(repo_path), pytest.raises(FileExistsError):
