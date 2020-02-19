@@ -40,6 +40,19 @@ def _sha256(path: pathlib.Path) -> str:
     return h.hexdigest()
 
 
+def _sha256_text(text: str) -> str:
+    h = hashlib.sha256()
+    h.update(text.encode())
+    return h.hexdigest()
+
+
+def _ensure_path(path: pathlib.Path, root: pathlib.Path) -> None:
+    rel_path = path.relative_to(root)  # Check that root in an ancestor
+    for parent in rel_path.parents:
+        parent.mkdir(exist_ok=True)
+    path.mkdir(exist_ok=True)
+
+
 def _read_shasum_index(path: pathlib.Path) -> Dict[str, str]:
     split_lines = (line.split() for line in path.read_text().splitlines())
     return {line[-1]: line[0] for line in split_lines}
@@ -190,8 +203,16 @@ def link(
             raise FileExistsError
 
         dst_path.symlink_to(src_path)
-        cas_path = cas / _sha256(src_path)
-        cas_path.symlink_to(src_path)
+        checksum = _sha256(src_path)
+        cas_path = cas / checksum
+        if cas_path.is_symlink():
+            tgt = os.readlink(cas_path)
+            if tgt != str(src_path):
+                found_path = cas / "found" / _sha256_text(tgt)
+                _ensure_path(found_path.parent, cas)
+                found_path.symlink_to(dst_path)
+        else:
+            cas_path.symlink_to(src_path)
 
 
 def track(

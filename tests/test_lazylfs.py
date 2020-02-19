@@ -261,20 +261,29 @@ def test_common_paths_resolve_to_samefile_after_link(empty_repo, base_legacy):
 
 
 def test_link_only_appends_to_cas(tmp_path, base_legacy, base_repo, base_cas):
-    src = base_legacy / "a"
     dst = base_repo / "a"
-    new_file = src / "new_file"
-    new_file.write_text("newcomer")
+    src = base_legacy / "a2"
+    src.mkdir()
+    # Existing name, novel content, albeit at a different location to avoid a panic
+    new_file = src / "f"
+    new_file.write_text("not-foxtrot")
+    # Novel name, existing content
+    new_file = src / "not-f"
+    new_file.write_text(_SAMPLE_TREE["a"]["e"]["f"])
+
+    # TODO: Test this scenario for other properties
 
     before = {
         path: _calc_fingerprint(path, False, _STABLE_ATTRS)
         for path in base_cas.rglob("*")
     }
-
     cli.link(src, dst)
-
     after = {path: _calc_fingerprint(path, False, _STABLE_ATTRS) for path in before}
+    assert after == before
 
+    before = after
+    cli.link(base_legacy / "a", base_repo / "a2")
+    after = {path: _calc_fingerprint(path, False, _STABLE_ATTRS) for path in before}
     assert after == before
 
 
