@@ -136,6 +136,16 @@ def _find(top: pathlib.Path) -> Iterator[pathlib.Path]:
     yield from top.rglob("*")
 
 
+def _find_repo_root(start: pathlib.Path) -> pathlib.Path:
+    if not start.is_dir():
+        start = start.parent
+    for parent in itertools.chain([start], start.parents):
+        names = {path.name for path in parent.iterdir()}
+        if ".git" in names:
+            return parent
+    raise FileNotFoundError
+
+
 def link(
     src: PathT,
     dst: PathT,
@@ -163,6 +173,8 @@ def link(
     }
 
     dst.mkdir(exist_ok=True)
+    cas = _find_repo_root(dst) / "cas"
+    cas.mkdir(exist_ok=True)
 
     for tail in sorted(src_tails):
         src_path = src / tail
@@ -178,6 +190,8 @@ def link(
             raise FileExistsError
 
         dst_path.symlink_to(src_path)
+        cas_path = cas / _sha256(src_path)
+        cas_path.symlink_to(src_path)
 
 
 def track(

@@ -159,9 +159,18 @@ def base_legacy(tmp_path):
 
 
 @pytest.fixture()
-def base_repo(tmp_path, base_legacy):
+def empty_repo(tmp_path):
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
+    git_path = repo_path / ".git"
+    git_path.mkdir()
+    yield repo_path
+
+
+@pytest.fixture()
+def base_repo(empty_repo, base_legacy):
+    repo_path = empty_repo
+
     cli.link(base_legacy / "a", repo_path / "a")
     cli.track(repo_path)
 
@@ -175,6 +184,14 @@ def base_repo(tmp_path, base_legacy):
     yield repo_path
 
 
+# TODO: Refactor fixtures because they smell pointless
+@pytest.fixture()
+def base_cas(empty_repo):
+    repo_path = empty_repo
+    cas_path = repo_path / "cas"
+    yield cas_path
+
+
 @pytest.mark.parametrize(
     "create_path",
     [
@@ -182,9 +199,8 @@ def base_repo(tmp_path, base_legacy):
         lambda path: path.parent.mkdir() or path.symlink_to("anything"),
     ],
 )
-def test_link_fails_if_existing_and_different(tmp_path, base_legacy, create_path):
-    repo_path = tmp_path / "repo"
-    repo_path.mkdir()
+def test_link_fails_if_existing_and_different(empty_repo, base_legacy, create_path):
+    repo_path = empty_repo
 
     existing_path = repo_path / "a/g"
     create_path(existing_path)
@@ -196,27 +212,26 @@ def test_link_fails_if_existing_and_different(tmp_path, base_legacy, create_path
         cli.link(base_legacy / "a", repo_path / "a")
 
 
-def test_link_skips_if_existing_and_same(tmp_path, base_legacy):
+def test_link_skips_if_existing_and_same(empty_repo, base_legacy):
     # This enables idempotency
-    repo_path = tmp_path / "repo"
-    repo_path.mkdir()
+    repo_path = empty_repo
+
     cli.link(base_legacy / "a", repo_path / "a")
 
     with assert_nullipotent(repo_path):
         cli.link(base_legacy / "a", repo_path / "a")
 
 
-def test_link_does_not_affect_src(tmp_path, base_legacy):
-    repo_path = tmp_path / "repo"
-    repo_path.mkdir()
+def test_link_does_not_affect_src(empty_repo, base_legacy):
+    repo_path = empty_repo
 
     with assert_nullipotent(base_legacy):
         cli.link(base_legacy / "a", repo_path / "a")
 
 
-def test_common_paths_resolve_to_samefile_after_link(tmp_path, base_legacy):
-    repo_path = tmp_path / "repo"
-    repo_path.mkdir()
+def test_common_paths_resolve_to_samefile_after_link(empty_repo, base_legacy):
+    repo_path = empty_repo
+
     src = base_legacy / "a"
     dst = repo_path / "a"
     cli.link(src, dst)
@@ -245,9 +260,27 @@ def test_common_paths_resolve_to_samefile_after_link(tmp_path, base_legacy):
     assert src_fingerprint == dst_fingerprint
 
 
-def test_track_is_idempotent(tmp_path, base_legacy):
-    repo_path = tmp_path / "repo"
-    repo_path.mkdir()
+def test_link_only_appends_to_cas(tmp_path, base_legacy, base_repo, base_cas):
+    src = base_legacy / "a"
+    dst = base_repo / "a"
+    new_file = src / "new_file"
+    new_file.write_text("newcomer")
+
+    before = {
+        path: _calc_fingerprint(path, False, _STABLE_ATTRS)
+        for path in base_cas.rglob("*")
+    }
+
+    cli.link(src, dst)
+
+    after = {path: _calc_fingerprint(path, False, _STABLE_ATTRS) for path in before}
+
+    assert after == before
+
+
+def test_track_is_idempotent(empty_repo, base_legacy):
+    repo_path = empty_repo
+
     cli.link(base_legacy / "a", repo_path / "a")
     cli.track(repo_path)
 
@@ -384,12 +417,9 @@ def test_check_added_lnk_new_dir(base_repo):
         cli.check(base_repo / "a/e/.shasum")
 
 
-def test_workflow_cli(tmp_path):
-    legacy_path = tmp_path / "legacy"
-    _create_tree(legacy_path, _SAMPLE_TREE)
-
-    repo_path = tmp_path / "repo"
-    repo_path.mkdir()
+def test_workflow_cli(empty_repo, base_legacy):
+    legacy_path = base_legacy
+    repo_path = empty_repo
 
     # Skip some of the unhappy path tests because
     # * they should work the same as for lib,
