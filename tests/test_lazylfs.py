@@ -11,6 +11,7 @@ import os
 import pathlib
 import stat
 import subprocess
+import tempfile
 from typing import Collection, Dict
 
 import pytest
@@ -48,6 +49,19 @@ _SAMPLE_TREE = {
     "i": {"j": File("julia"), "brother": Link("./j"), "cousin": Link("../a/g")},
     "k": File("kilo"),
 }
+
+
+def _mktemp(*args, **kwargs):
+    f, path = tempfile.mkstemp(*args, **kwargs)
+    os.close(f)
+    return path
+
+
+def _mkltemp(tgt, *args, **kwargs):
+    path = _mktemp(*args, **kwargs)
+    os.unlink(path)
+    os.symlink(tgt, path)
+    return path
 
 
 def _maybe_write_text(on_conflict, path, new):
@@ -172,7 +186,6 @@ def base_repo(empty_repo, base_legacy):
     repo_path = empty_repo
 
     cli.link(base_legacy / "a", repo_path / "a")
-    cli.track(repo_path)
 
     _create_tree(
         repo_path / "a", _SAMPLE_TREE["a"], on_conflict=cli.ConflictResolution.THEIRS
@@ -287,22 +300,11 @@ def test_link_only_appends_to_cas(tmp_path, base_legacy, base_repo, base_cas):
     assert after == before
 
 
-def test_track_is_idempotent(empty_repo, base_legacy):
-    repo_path = empty_repo
-
-    cli.link(base_legacy / "a", repo_path / "a")
-    cli.track(repo_path)
-
-    with assert_nullipotent(repo_path):
-        cli.track(repo_path)
-
-
 def test_check_on_clean_repo(base_repo):
     with assert_nullipotent(base_repo):
         cli.check(base_repo)
         cli.check(base_repo / "a/g")
         cli.check(base_repo / "a/h")
-        cli.check(base_repo / "a/.shasum")
 
         # Check should ignore paths that are not links
         # Will happen if not all paths in repo are links
@@ -313,7 +315,6 @@ def test_check_on_clean_repo(base_repo):
         # * was link and has been deleted from repo and index,
         # * was other type and has been deleted (never in index)
         cli.check(base_repo / "a/dir/bad")
-        cli.check(base_repo / "a/dir/.shasum")
 
 
 def test_check_modified_tgt(base_repo):
@@ -325,15 +326,12 @@ def test_check_modified_tgt(base_repo):
             cli.check(base_repo)
         with pytest.raises(cli.NotOkError):
             cli.check(base_repo / "a/g")
-        with pytest.raises(cli.NotOkError):
-            cli.check(base_repo / "a/.shasum")
 
         # One invalid link should not impact ability to validate on work on other files
         cli.check(base_repo / "a/reg")
         cli.check(base_repo / "a/dir")
         cli.check(base_repo / "a/dir/bad")
         cli.check(base_repo / "a/e/f")
-        cli.check(base_repo / "a/e/.shasum")
         cli.check(base_repo / "a/h")
 
 
@@ -345,41 +343,17 @@ def test_check_deleted_tgt(base_repo):
             cli.check(base_repo)
         with pytest.raises(cli.NotOkError):
             cli.check(base_repo / "a/g")
-        with pytest.raises(cli.NotOkError):
-            cli.check(base_repo / "a/.shasum")
 
         # One invalid link should not impact ability to validate on work on other files
         cli.check(base_repo / "a/reg")
         cli.check(base_repo / "a/dir")
         cli.check(base_repo / "a/dir/bad")
         cli.check(base_repo / "a/e/f")
-        cli.check(base_repo / "a/e/.shasum")
         cli.check(base_repo / "a/h")
 
 
-def test_check_deleted_lnk(base_repo):
-    # Equivalent to adding entry in index
-    (base_repo / "a/g").unlink()
-
-    with assert_nullipotent(base_repo):
-        with pytest.raises(cli.NotOkError):
-            cli.check(base_repo)
-        with pytest.raises(cli.NotOkError):
-            cli.check(base_repo / "a/g")
-        with pytest.raises(cli.NotOkError):
-            cli.check(base_repo / "a/.shasum")
-
-        # One invalid link should not impact ability to validate on work on other files
-        cli.check(base_repo / "a/reg")
-        cli.check(base_repo / "a/dir")
-        cli.check(base_repo / "a/dir/bad")
-        cli.check(base_repo / "a/e/f")
-        cli.check(base_repo / "a/e/.shasum")
-        cli.check(base_repo / "a/h")
-
-
-def test_check_added_lnk(base_repo):
-    # Equivalent to deleting entry in index
+def test_check_direct_lnk(base_repo):
+    # If check catches this then we know that link does not create any direct links.
     g = base_repo / "a/g"
     x = base_repo / "a/x"
     x.symlink_to(g.resolve())
@@ -389,41 +363,35 @@ def test_check_added_lnk(base_repo):
             cli.check(base_repo)
         with pytest.raises(cli.NotOkError):
             cli.check(base_repo / "a/x")
-        with pytest.raises(cli.NotOkError):
-            cli.check(base_repo / "a/.shasum")
 
         # One invalid link should not impact ability to validate on work on other files
         cli.check(base_repo / "a/reg")
         cli.check(base_repo / "a/dir")
         cli.check(base_repo / "a/dir/bad")
         cli.check(base_repo / "a/e/f")
-        cli.check(base_repo / "a/e/.shasum")
         cli.check(base_repo / "a/h")
 
 
-def test_check_added_lnk_new_dir(base_repo):
-    # Equivalent to deleting index
-
-    # Removing index is easier to implement than adding a new dir with files but the
-    # current test name makes it easier relating this test to other tests.
-    (base_repo / "a/.shasum").unlink()
+def test_check_added_lnk_new_dir(base_legacy, base_repo):
+    old_reg = pathlib.Path(_mktemp(dir=base_legacy))
+    old_reg.write_text("some file")
+    new_lnk = pathlib.Path(
+        _mkltemp(old_reg, dir=tempfile.mkdtemp(dir=os.fspath(base_repo)))
+    )
 
     with assert_nullipotent(base_repo):
         with pytest.raises(cli.NotOkError):
             cli.check(base_repo)
         with pytest.raises(cli.NotOkError):
-            cli.check(base_repo / "a/g")
+            cli.check(new_lnk.parent)
         with pytest.raises(cli.NotOkError):
-            cli.check(base_repo / "a/h")
-        with pytest.raises(cli.NotOkError):
-            cli.check(base_repo / "a/.shasum")
+            cli.check(new_lnk)
 
         # One invalid link should not impact ability to validate on work on other files
         cli.check(base_repo / "a/reg")
         cli.check(base_repo / "a/dir")
         cli.check(base_repo / "a/dir/bad")
         cli.check(base_repo / "a/e/f")
-        cli.check(base_repo / "a/e/.shasum")
 
 
 def test_workflow_cli(empty_repo, base_legacy):
@@ -440,7 +408,6 @@ def test_workflow_cli(empty_repo, base_legacy):
     assert not run(
         base_cmd + ["link", str(legacy_path / "a"), str(repo_path / "a")]
     ).stdout
-    assert not run(base_cmd + ["track", str(repo_path)]).stdout
     assert not run(base_cmd + ["check", str(repo_path)]).stdout
     assert not run(
         base_cmd + ["check"],

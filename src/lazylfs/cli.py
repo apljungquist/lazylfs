@@ -2,18 +2,14 @@ from __future__ import annotations
 
 import enum
 import hashlib
+import itertools
 import logging
 import os
 import pathlib
 import sys
-from typing import (
-    Union,
-    TYPE_CHECKING,
-    Dict,
-    Set,
-    Tuple,
-    Iterator,
-)
+from typing import Union, TYPE_CHECKING, Set, Tuple, Iterator
+
+from lazylfs import pathutils
 
 _logger = logging.getLogger(__name__)
 
@@ -25,9 +21,6 @@ class ConflictResolution(enum.Enum):
     THEIRS = "theirs"
     OURS = "ours"
     PANIC = "panic"
-
-
-_INDEX_NAME = ".shasum"
 
 
 def _sha256(path: pathlib.Path) -> str:
@@ -53,85 +46,11 @@ def _ensure_path(path: pathlib.Path, root: pathlib.Path) -> None:
     path.mkdir(exist_ok=True)
 
 
-def _read_shasum_index(path: pathlib.Path) -> Dict[str, str]:
-    split_lines = (line.split() for line in path.read_text().splitlines())
-    return {line[-1]: line[0] for line in split_lines}
-
-
-def _write_shasum_index(path: pathlib.Path, index: Dict[str, str]) -> None:
-    path.write_text("".join(sorted(f"{v}  {k}\n" for k, v in index.items())))
-
-
-class ShasumIntegrityIndex:
-    def __contains__(self, link_path: pathlib.Path) -> bool:
-        try:
-            self[link_path]
-        except KeyError:
-            return False
-        return True
-
-    def __getitem__(self, link_path: pathlib.Path) -> str:
-        try:
-            index = _read_shasum_index(link_path.parent / _INDEX_NAME)
-        except FileNotFoundError as e:
-            raise KeyError from e
-        return index[link_path.name]
-
-    def __setitem__(self, link_path: pathlib.Path, new: str) -> None:
-        index_filepath = link_path.parent / _INDEX_NAME
-        key = link_path.name
-        try:
-            index = _read_shasum_index(index_filepath)
-        except FileNotFoundError:
-            index = {}
-
-        if key in index:
-            if index[key] == new:
-                return
-            else:
-                raise PermissionError
-
-        index[key] = self.calc_checksum(link_path)
-        _write_shasum_index(index_filepath, index)
-
-    def calc_checksum(self, link_path: pathlib.Path) -> str:
-        return _sha256(link_path)
-
-    def add(self, link_path: pathlib.Path) -> None:
-        checksum = self.calc_checksum(link_path)
-        self[link_path] = checksum
-
-    def check(self, index_filepath: pathlib.Path) -> bool:
-        try:
-            index = _read_shasum_index(index_filepath)
-        except FileNotFoundError:
-            index = {}
-
-        actual_keys = set(index)
-        expected_keys = set(
-            path.name
-            for path in index_filepath.parent.iterdir()
-            if _should_be_indexed(path)
-        )
-
-        if actual_keys != expected_keys:
-            return False
-
-        for key, expected_checksum in index.items():
-            link_path = index_filepath.parent / key
-            actual_checksum = self.calc_checksum(link_path)
-            if actual_checksum != expected_checksum:
-                return False
-
-        return True
-
-
-def _should_be_indexed(link_path: pathlib.Path) -> bool:
-    return (
-        link_path.is_symlink()
-        and link_path.is_file()
-        and os.path.isabs(os.readlink(link_path))
-    )
+def _relative_path(start, end) -> str:
+    common = os.path.commonpath([start, end])
+    up = os.path.join(*[os.pardir] * len(os.path.relpath(start, common).split(os.sep)))
+    down = os.path.relpath(end, common)
+    return os.path.join(up, down)
 
 
 def _collect_paths(includes: Tuple[str, ...]) -> Set[pathlib.Path]:
@@ -195,14 +114,6 @@ def link(
         dst_path.parent.mkdir(parents=True, exist_ok=True)
         _logger.debug("Linking %s", str(tail))
 
-        if dst_path.is_symlink() and os.readlink(dst_path) == os.fspath(src_path):
-            _logger.debug("Path exists and is equivalent, skipping")
-            continue
-
-        if dst_path.is_symlink() or dst_path.exists():
-            raise FileExistsError
-
-        dst_path.symlink_to(src_path)
         checksum = _sha256(src_path)
         cas_path = cas / checksum
         if cas_path.is_symlink():
@@ -214,24 +125,17 @@ def link(
         else:
             cas_path.symlink_to(src_path)
 
+        if (
+            dst_path.is_symlink()
+            and os.path.split(os.readlink(dst_path))[1] == checksum
+        ):
+            _logger.debug("Path exists and is equivalent, skipping")
+            continue
 
-def track(
-    *includes: str,
-    on_conflict: Union[str, ConflictResolution] = ConflictResolution.PANIC,
-) -> None:
-    """Track the checksum of files in the index"""
-    on_conflict = ConflictResolution(on_conflict)
-    if on_conflict is not ConflictResolution.PANIC:
-        raise NotImplementedError("Only on_conflict=panic is implemented")
+        if dst_path.is_symlink() or dst_path.exists():
+            raise FileExistsError
 
-    _track(_collect_paths(includes))
-
-
-def _track(paths: Set[pathlib.Path]) -> None:
-    index = ShasumIntegrityIndex()
-    for path in paths:
-        if _should_be_indexed(path):
-            index.add(path)
+        dst_path.symlink_to(_relative_path(dst_path.parent, cas_path))
 
 
 class NotOkError(Exception):
@@ -250,27 +154,63 @@ def check(
     on_conflict = ConflictResolution(on_conflict)
     if on_conflict is not ConflictResolution.PANIC:
         raise NotImplementedError("Only on_conflict=panic is implemented")
+    paths = _collect_paths(includes)
+    _check(_find_repo_root(next(iter(paths))), paths)
 
-    _check(_collect_paths(includes))
+
+def _find_brdige(root: pathlib.Path, path: pathlib.Path) -> pathlib.Path:
+    src = path
+    for tgt in pathutils.trace_symlink(path):
+        try:
+            path.relative_to(root)
+        except ValueError:
+            return src
+        src = tgt
+    raise FileNotFoundError
 
 
-def _check(paths: Set[pathlib.Path]) -> None:
+def _check(repo: pathlib.Path, paths: Set[pathlib.Path]) -> None:
     ok = True
-    index = ShasumIntegrityIndex()
+    cas = repo / "cas"
+
+    # Collect content. Factor out?
+    cas_paths_to_check = set()
     for path in paths:
-        if path.name == _INDEX_NAME:
-            if index.check(path):
-                continue
-        elif _should_be_indexed(path):
-            if path in index:
-                if index[path] == index.calc_checksum(path):
-                    continue
+        if not path.is_symlink():
+            continue
+
+        try:
+            path.relative_to(cas)
+        except ValueError:
+            pass
         else:
-            if path not in index:
+            continue
+        for hop in pathutils.trace_symlink(path):
+            try:
+                hop.relative_to(repo)
+            except ValueError:
+                _logger.debug("NOK because link is not tracked %s", str(path))
+                ok &= False
+                break
+
+            try:
+                hop.relative_to(cas)
+            except ValueError:
                 continue
 
-        ok &= False
-        _logger.debug("NOK %s", path)
+            cas_paths_to_check.add(hop)
+            break
+
+    # Check content. Factor out?
+    for path in cas_paths_to_check:
+        expected = path.name
+        try:
+            actual = _sha256(path)
+        except FileNotFoundError as e:
+            raise NotOkError from e
+        if actual != expected:
+            ok &= False
+            _logger.debug("NOK %s", path)
 
     if not ok:
         raise NotOkError
@@ -280,4 +220,4 @@ def main():
     import fire  # type: ignore
 
     logging.basicConfig(level=getattr(logging, os.environ.get("LEVEL", "WARNING")))
-    fire.Fire({func.__name__: func for func in [link, track, check]})
+    fire.Fire({func.__name__: func for func in [link, check]})
