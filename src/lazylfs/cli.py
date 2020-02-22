@@ -14,6 +14,8 @@ from typing import (
     Iterator,
 )
 
+from lazylfs import pathutils
+
 _logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -155,14 +157,8 @@ def link(src: PathT, dst: PathT,) -> None:
         dst_path.parent.mkdir(parents=True, exist_ok=True)
         _logger.debug("Linking %s", str(tail))
 
-        if dst_path.is_symlink() and os.readlink(dst_path) == os.fspath(src_path):
+        if not pathutils.ensure_lnk(dst_path, src_path):
             _logger.debug("Path exists and is equivalent, skipping")
-            continue
-
-        if dst_path.is_symlink() or dst_path.exists():
-            raise FileExistsError
-
-        dst_path.symlink_to(src_path)
 
 
 def track(*includes: str,) -> None:

@@ -15,7 +15,7 @@ from typing import Collection, Dict
 
 import pytest
 
-from lazylfs import cli
+from lazylfs import cli, pathutils
 
 _logger = logging.getLogger(__name__)
 
@@ -50,41 +50,20 @@ _SAMPLE_TREE = {
 }
 
 
-def _maybe_write_text(path, new):
-    if path.exists():
-        old = path.read_text()
-        if old == new:
-            return
-
-        _logger.debug("File exists and is different, panicking %s", str(path))
-        raise PermissionError
-
-    path.write_text(new)
-
-
-def _maybe_symlink_to(path, new: str):
-    if path.exists():
-        old = os.readlink(path.read_text())
-        if old == new:
-            return
-
-        _logger.debug("Link exists and is different, panicking %s", str(path))
-        raise PermissionError
-
-    path.symlink_to(new)
-
-
-def _create_tree(path, spec):
-    if isinstance(spec, dict):
-        path.mkdir(exist_ok=True)
-        for name in spec:
-            _create_tree(path / name, spec[name])
-    elif isinstance(spec, File):
-        _maybe_write_text(path, spec)
-    elif isinstance(spec, Link):
-        _maybe_symlink_to(path, spec)
-    else:
-        raise ValueError
+def _create_tree(path, spec, ignored_exceptions=()):
+    try:
+        if isinstance(spec, dict):
+            path.mkdir(exist_ok=True)
+            for name in spec:
+                _create_tree(path / name, spec[name], ignored_exceptions)
+        elif isinstance(spec, File):
+            pathutils.ensure_reg(path, spec)
+        elif isinstance(spec, Link):
+            pathutils.ensure_lnk(path, spec)
+        else:
+            raise ValueError
+    except ignored_exceptions as e:
+        _logger.debug("Ignoring exception %s", str(e))
 
 
 _SAMEFILE_ATTRS = {
@@ -153,7 +132,7 @@ def base_repo(tmp_path, base_legacy):
     cli.link(base_legacy / "a", repo_path / "a")
     cli.track(repo_path)
 
-    _create_tree(repo_path / "a", _SAMPLE_TREE["a"])
+    _create_tree(repo_path / "a", _SAMPLE_TREE["a"], FileExistsError)
 
     (repo_path / "a/reg").touch()
     (repo_path / "a/dir").mkdir()
