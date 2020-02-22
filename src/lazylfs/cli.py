@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import enum
 import hashlib
 import logging
 import os
@@ -19,12 +18,6 @@ _logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     PathT = Union[str, os.PathLike[str], pathlib.Path]
-
-
-class ConflictResolution(enum.Enum):
-    THEIRS = "theirs"
-    OURS = "ours"
-    PANIC = "panic"
 
 
 _INDEX_NAME = ".shasum"
@@ -136,20 +129,12 @@ def _find(top: pathlib.Path) -> Iterator[pathlib.Path]:
     yield from top.rglob("*")
 
 
-def link(
-    src: PathT,
-    dst: PathT,
-    on_conflict: Union[str, ConflictResolution] = ConflictResolution.PANIC,
-) -> None:
+def link(src: PathT, dst: PathT,) -> None:
     """Create links in `dst` to the corresponding files in `src`
 
     :param src: Directory under which to look for files
     :param dst: Directory under which to create symlinks
     """
-    on_conflict = ConflictResolution(on_conflict)
-    if on_conflict is not ConflictResolution.PANIC:
-        raise NotImplementedError("Only on_conflict=panic is implemented")
-
     src = pathlib.Path(src).resolve()
     dst = pathlib.Path(dst).resolve()
 
@@ -180,15 +165,8 @@ def link(
         dst_path.symlink_to(src_path)
 
 
-def track(
-    *includes: str,
-    on_conflict: Union[str, ConflictResolution] = ConflictResolution.PANIC,
-) -> None:
+def track(*includes: str,) -> None:
     """Track the checksum of files in the index"""
-    on_conflict = ConflictResolution(on_conflict)
-    if on_conflict is not ConflictResolution.PANIC:
-        raise NotImplementedError("Only on_conflict=panic is implemented")
-
     _track(_collect_paths(includes))
 
 
@@ -203,19 +181,12 @@ class NotOkError(Exception):
     pass
 
 
-def check(
-    *includes: str,
-    on_conflict: Union[str, ConflictResolution] = ConflictResolution.PANIC,
-) -> None:
+def check(*includes: str,) -> None:
     """Check the checksum of files against the index
 
     Exit with non-zero status if a difference is detected or a file could not be
     checked.
     """
-    on_conflict = ConflictResolution(on_conflict)
-    if on_conflict is not ConflictResolution.PANIC:
-        raise NotImplementedError("Only on_conflict=panic is implemented")
-
     _check(_collect_paths(includes))
 
 

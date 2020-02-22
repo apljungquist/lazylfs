@@ -50,51 +50,39 @@ _SAMPLE_TREE = {
 }
 
 
-def _maybe_write_text(on_conflict, path, new):
+def _maybe_write_text(path, new):
     if path.exists():
         old = path.read_text()
         if old == new:
             return
 
-        if on_conflict is cli.ConflictResolution.THEIRS:
-            _logger.debug("File exists and is different, skipping %s", str(path))
-            return
-
-        if on_conflict is cli.ConflictResolution.PANIC:
-            _logger.debug("File exists and is different, panicking %s", str(path))
-            raise PermissionError
+        _logger.debug("File exists and is different, panicking %s", str(path))
+        raise PermissionError
 
     path.write_text(new)
 
 
-def _maybe_symlink_to(on_conflict, path, new: str):
+def _maybe_symlink_to(path, new: str):
     if path.exists():
         old = os.readlink(path.read_text())
         if old == new:
             return
 
-        if on_conflict is cli.ConflictResolution.THEIRS:
-            _logger.debug("Link exists and is different, skipping %s", str(path))
-            return
-
-        if on_conflict is cli.ConflictResolution.PANIC:
-            _logger.debug("Link exists and is different, panicking %s", str(path))
-            raise PermissionError
+        _logger.debug("Link exists and is different, panicking %s", str(path))
+        raise PermissionError
 
     path.symlink_to(new)
 
 
-def _create_tree(
-    path, spec, on_conflict: cli.ConflictResolution = cli.ConflictResolution.PANIC
-):
+def _create_tree(path, spec):
     if isinstance(spec, dict):
         path.mkdir(exist_ok=True)
         for name in spec:
             _create_tree(path / name, spec[name])
     elif isinstance(spec, File):
-        _maybe_write_text(on_conflict, path, spec)
+        _maybe_write_text(path, spec)
     elif isinstance(spec, Link):
-        _maybe_symlink_to(on_conflict, path, spec)
+        _maybe_symlink_to(path, spec)
     else:
         raise ValueError
 
@@ -165,9 +153,7 @@ def base_repo(tmp_path, base_legacy):
     cli.link(base_legacy / "a", repo_path / "a")
     cli.track(repo_path)
 
-    _create_tree(
-        repo_path / "a", _SAMPLE_TREE["a"], on_conflict=cli.ConflictResolution.THEIRS
-    )
+    _create_tree(repo_path / "a", _SAMPLE_TREE["a"])
 
     (repo_path / "a/reg").touch()
     (repo_path / "a/dir").mkdir()
