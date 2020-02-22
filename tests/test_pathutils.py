@@ -62,3 +62,59 @@ def test_trace_symlink_by_example(tmp_path, tree, start, expected):
         assert l.name == r
     with pytest.raises(StopIteration):
         next(hops)
+
+
+@pytest.mark.parametrize(
+    "ensure_file",
+    [
+        lambda p: pathutils.ensure_lnk(p, "foo"),
+        lambda p: pathutils.ensure_reg(p, "foo"),
+    ],
+)
+def test_ensure_file_raises_if_parent_does_not_exist(tmp_path, ensure_file):
+    with pytest.raises(FileNotFoundError):
+        ensure_file(tmp_path / "a/b")
+
+
+def test_ensure_dir_raises_if_root_does_not_exist(tmp_path):
+    path = tmp_path / "a/e"
+    with pytest.raises(FileNotFoundError):
+        pathutils.ensure_dir(path, path.parent)
+
+
+@pytest.mark.parametrize(
+    "ensure_file",
+    [
+        lambda p: pathutils.ensure_lnk(p, "foo"),
+        lambda p: pathutils.ensure_reg(p, "foo"),
+    ],
+)
+@pytest.mark.parametrize(
+    "create_path",
+    [
+        lambda p: pathutils.ensure_dir(p, p.parent),
+        lambda p: pathutils.ensure_lnk(p, "spanish_inquisition"),
+        lambda p: pathutils.ensure_reg(p, "spanish_inquisition"),
+    ],
+)
+def test_ensure_path_raises_if_path_exists_and_is_different(
+    tmp_path, ensure_file, create_path
+):
+    path = tmp_path / "x"
+    create_path(path)
+    with pytest.raises(FileExistsError):
+        ensure_file(path)
+
+
+@pytest.mark.parametrize(
+    "create_path",
+    [
+        lambda p: pathutils.ensure_lnk(p, "spanish_inquisition"),
+        lambda p: pathutils.ensure_reg(p, "spanish_inquisition"),
+    ],
+)
+def test_ensure_dir_raises_if_path_exists_and_is_different(tmp_path, create_path):
+    path = tmp_path / "x"
+    create_path(path)
+    with pytest.raises(FileExistsError):
+        pathutils.ensure_dir(path, path.parent)
