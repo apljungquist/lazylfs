@@ -83,7 +83,7 @@ def create_tree(top: pathlib.Path, spec) -> None:
 
 
 @pytest.mark.parametrize(
-    "tree, start, expected",
+    "tree, start, nodes",
     [
         # normpath would fail om this because it works on pure paths
         (
@@ -94,26 +94,51 @@ def create_tree(top: pathlib.Path, spec) -> None:
                 "b": File("B"),
             },
             "llb",
-            ["lb", "b"],
+            ["llb", "lb", "b"],
+        ),
+        (
+            {
+                "a": {"e": {"i": {"la": Link("../..")}}},
+                "li": Link("./a/e/i/"),
+                "lla": Link("./li/la"),
+            },
+            "lla",
+            ["lla", "la", "a"],
         ),
         # Direct link
-        ({"b": Link("./c"), "c": File("C")}, "b", ["c"]),
+        ({"b": Link("./c"), "c": File("C")}, "b", ["b", "c"]),
+    ],
+)
+def test_trace_symlink_by_example(tmp_path, tree, start, nodes):
+    create_tree(tmp_path, tree)
+    hops = list(pathutils.trace_symlink(tmp_path / start))
+    assert [hop.name for hop in hops] == nodes[
+        1:
+    ], "Did not pass through expected nodes"
+    for hop in hops:
+        assert hop.samefile(tmp_path / start), "Did not resolve to correct file"
+    assert not hops[-1].is_symlink(), "Some symlinks not resolved"
+
+
+@pytest.mark.parametrize(
+    "tree, start, nodes",
+    [
         # Self reference
-        ({"b": Link("./b")}, "b", []),
+        ({"b": Link("./b")}, "b", ["b"]),
         # Short cycle
-        ({"b": Link("./c"), "c": Link("./b")}, "b", ["c"]),
+        ({"b": Link("./c"), "c": Link("./b")}, "b", ["b", "c"]),
         # Eventual cycle
         (
             {"b": Link("./c"), "c": Link("./d"), "d": Link("./f"), "f": Link("./c")},
             "b",
-            ["c", "d", "f"],
+            ["b", "c", "d", "f"],
         ),
     ],
 )
-def test_trace_symlink_by_example(tmp_path, tree, start, expected):
+def test_trace_symlink_does_not_get_stuck_in_loops(tmp_path, tree, start, nodes):
     create_tree(tmp_path, tree)
     hops = pathutils.trace_symlink(tmp_path / start)
-    for l, r in zip(hops, expected):
+    for l, r in zip(hops, nodes[1:]):
         assert l.name == r
     with pytest.raises(StopIteration):
         next(hops)
