@@ -66,7 +66,7 @@ def ensure_dir(path: os.PathLike, root: os.PathLike) -> bool:
     :param root: an existing ancestor of the directory
     :return: ``True`` if path was created, ``False`` otherwise
     :raises FileExistsError: if the path exists and is different than what would be
-    created by this function.
+        created by this function.
     """
     path = pathlib.Path(path)
     root = pathlib.Path(root)
@@ -101,7 +101,7 @@ def ensure_lnk(path: os.PathLike, tgt: os.PathLike) -> bool:
     :param tgt: desired target of the symlink
     :return: ``True`` if path was created, ``False`` otherwise
     :raises FileExistsError: if the path exists and is different than what would be
-    created by this function.
+        created by this function.
     """
     try:
         st_mode = os.lstat(path).st_mode
@@ -131,7 +131,7 @@ def ensure_reg(path: os.PathLike, content: Union[bytes, str]) -> bool:
     :param content: desired content of given file
     :return: ``True`` if path was created, ``False`` otherwise
     :raises FileExistsError: if the path exists and is different than what would be
-    created by this function.
+        created by this function.
     """
     if isinstance(content, str):
         content = content.encode()
