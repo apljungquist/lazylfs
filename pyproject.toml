@@ -1,3 +1,11 @@
 [build-system]
-requires = ["setuptools >= 40"]
+requires = [
+    "setuptools >= 42",
+    "setuptools_scm[toml]>=3.4",
+    "wheel"
+    ]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+write_to = "src/lazylfs/version.py"
+write_to_template = "__version__ = \"{version}\"\n"

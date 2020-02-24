@@ -1,1 +1,3 @@
+global-exclude *
 graft src
+include setup.py

@@ -4,3 +4,6 @@
 # virtualenvs
 venv/
 .tox/
+
+# Generated files
+src/lazylfs/version.py

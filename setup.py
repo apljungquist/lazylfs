@@ -4,7 +4,6 @@ import setuptools
 
 setuptools.setup(
     name="lazylfs",
-    version="0.3.1",
     author="AP Ljungquist",
     author_email="ap@ljungquist.eu",
     description="A quick way to version control data",
