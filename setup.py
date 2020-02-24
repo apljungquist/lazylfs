@@ -1,12 +1,28 @@
 #!/usr/bin/env python
+import pathlib
 
 import setuptools
+
+
+def _read(rel_path: str) -> str:
+    abs_path = pathlib.Path(__file__).parent / rel_path
+    return abs_path.read_text()
+
+
+def _read_tagline() -> str:
+    lines = _read("README.md").splitlines(keepends=False)
+    for line in lines:
+        if line and line[0] == line[-1] == "*":
+            return line[1:-1]
+
 
 setuptools.setup(
     name="lazylfs",
     author="AP Ljungquist",
     author_email="ap@ljungquist.eu",
-    description="A quick way to version control data",
+    description=_read_tagline(),
+    long_description=_read("README.md"),
+    long_description_content_type="text/markdown",
     url="https://github.com/apljungquist/lazylfs",
     packages=setuptools.find_packages("src"),
     classifiers=[
