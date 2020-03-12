@@ -30,6 +30,8 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/apljungquist/lazylfs",
     packages=setuptools.find_packages("src"),
+    package_data={"lazylfs": ["py.typed"],},
+    zip_safe=False,
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
