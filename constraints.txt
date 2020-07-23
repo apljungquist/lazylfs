@@ -9,11 +9,10 @@ attrs==19.3.0             # via black, pytest
 black==19.10b0
 click==7.0                # via black, pip-tools
 coverage==5.0.3
-entrypoints==0.3          # via flake8
 filelock==3.0.12          # via tox
 fire==0.2.1
-flake8==3.7.9
-importlib-metadata==1.4.0  # via pluggy, pytest, tox
+flake8==3.8.3
+importlib-metadata==1.4.0  # via flake8, pluggy, pytest, tox
 mccabe==0.6.1             # via flake8
 more-itertools==8.1.0     # via pytest, zipp
 mypy-extensions==0.4.3    # via mypy
@@ -23,8 +22,8 @@ pathspec==0.7.0           # via black
 pip-tools==4.4.0
 pluggy==0.13.1            # via pytest, tox
 py==1.8.1                 # via pytest, tox
-pycodestyle==2.5.0        # via flake8
-pyflakes==2.1.1           # via flake8
+pycodestyle==2.6.0        # via flake8
+pyflakes==2.2.0           # via flake8
 pyparsing==2.4.6          # via packaging
 pytest==5.3.4
 regex==2020.1.8           # via black

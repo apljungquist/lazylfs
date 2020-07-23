@@ -138,8 +138,8 @@ def test_trace_symlink_by_example(tmp_path, tree, start, nodes):
 def test_trace_symlink_does_not_get_stuck_in_loops(tmp_path, tree, start, nodes):
     create_tree(tmp_path, tree)
     hops = pathutils.trace_symlink(tmp_path / start)
-    for l, r in zip(hops, nodes[1:]):
-        assert l.name == r
+    for hop, node in zip(hops, nodes[1:]):
+        assert hop.name == node
     with pytest.raises(StopIteration):
         next(hops)
 

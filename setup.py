@@ -30,7 +30,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/apljungquist/lazylfs",
     packages=setuptools.find_packages("src"),
-    package_data={"lazylfs": ["py.typed"],},
+    package_data={"lazylfs": ["py.typed"]},
     zip_safe=False,
     classifiers=[
         "Programming Language :: Python :: 3",
@@ -40,5 +40,5 @@ setuptools.setup(
     install_requires=_read_requirements("install_requires"),
     extras_require={"cli": _read_requirements("extras_require-cli")},
     package_dir={"": "src"},
-    entry_points={"console_scripts": ["lazylfs = lazylfs.cli:main [cli]"],},
+    entry_points={"console_scripts": ["lazylfs = lazylfs.cli:main [cli]"]},
 )
