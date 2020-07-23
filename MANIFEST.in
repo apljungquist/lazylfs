@@ -1,3 +1,4 @@
 global-exclude *
 graft src
 include setup.py README.md
+include requirements/*

@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import pathlib
+from typing import List
 
 import setuptools
 
@@ -16,6 +17,10 @@ def _read_tagline() -> str:
             return line[1:-1]
 
 
+def _read_requirements(name: str) -> List[str]:
+    return list(_read(f"requirements/{name}.txt").splitlines())
+
+
 setuptools.setup(
     name="lazylfs",
     author="AP Ljungquist",
@@ -30,8 +35,8 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: Unix",
     ],
-    install_requires=["sprig"],
-    extras_require={"cli": ["fire"]},
+    install_requires=_read_requirements("install_requires"),
+    extras_require={"cli": _read_requirements("extras_require-cli")},
     package_dir={"": "src"},
     entry_points={"console_scripts": ["lazylfs = lazylfs.cli:main [cli]"],},
 )

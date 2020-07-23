@@ -16,7 +16,7 @@ jobs:
     - name: Install dependencies
       run: |
         pip install -c constraints.txt pip setuptools
-        pip install -c constraints.txt tox
+        pip install -c constraints.txt tox-constraints
     - name: Run tests with tox
       run: |
         tox
