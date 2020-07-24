@@ -2,19 +2,25 @@ from __future__ import annotations
 
 import logging
 import pathlib
+from typing import Iterable
 
 from lazylfs import pathutils
 
 _logger = logging.getLogger(__name__)
 
 
-def link(src: pathlib.Path, dst: pathlib.Path,) -> None:
+def _find(top: pathlib.Path, includes: Iterable[str]) -> Iterable[pathlib.Path]:
+    for include in includes:
+        yield from top.glob(include)
+
+
+def link(src: pathlib.Path, dst: pathlib.Path, includes: Iterable[str]) -> None:
     if not src.is_dir():
         raise ValueError("Expected src to be a directory")
 
     src_tails = {
         pathlib.Path(path).relative_to(src)
-        for path in src.rglob("*")
+        for path in _find(src, includes)
         if path.is_file() and not path.is_symlink()
     }
 

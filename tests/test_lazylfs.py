@@ -4,6 +4,7 @@ This is for pytest to find and stop being upset not finding any tests.
 >>> 'Happy?'[:-1]
 'Happy'
 """
+import collections
 import contextlib
 import functools
 import logging
@@ -208,6 +209,23 @@ def test_common_paths_resolve_to_samefile_after_link(tmp_path, base_legacy):
     }
 
     assert src_fingerprint == dst_fingerprint
+
+
+def test_link_ignores_files_not_matching_include(tmp_path, base_legacy):
+    repo_path = tmp_path / "repo"
+    cli.link(base_legacy, repo_path, ("*/g", "**/f"))
+
+    actual = collections.Counter(
+        str(path.relative_to(repo_path)) for path in repo_path.rglob("*")
+    )
+
+    expected = {
+        "a": 1,
+        "a/g": 1,
+        "a/e": 1,
+        "a/e/f": 1,
+    }
+    assert actual == expected
 
 
 def test_track_is_idempotent(tmp_path, base_legacy):

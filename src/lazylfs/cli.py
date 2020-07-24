@@ -35,15 +35,18 @@ def _find(top: pathlib.Path) -> Iterator[pathlib.Path]:
     yield from top.rglob("*")
 
 
-def link(src: PathT, dst: PathT,) -> None:
+def link(src: PathT, dst: PathT, includes: Tuple[str, ...] = ("**/*",)) -> None:
     """Create links in `dst` to the corresponding files in `src`
 
     :param src: Directory under which to look for files
     :param dst: Directory under which to create symlinks
+    :param includes: List of glob patterns specifying what files to link.
+        The default is to include everything.
+        Files matched by none of the patterns will not be linked.
     """
     src = pathlib.Path(src).resolve()
     dst = pathlib.Path(dst).resolve()
-    location.link(src, dst)
+    location.link(src, dst, includes)
 
 
 def track(*includes: str,) -> None:
