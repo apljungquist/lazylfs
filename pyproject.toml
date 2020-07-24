@@ -12,3 +12,16 @@ write_to_template = "__version__ = \"{version}\"\n"
 
 [tool.tox-constraints]
 plugin_enabled = true
+
+[tool.black]
+exclude = '''
+/(
+    \.eggs
+  | \.git
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
