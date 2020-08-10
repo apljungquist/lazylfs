@@ -1,8 +1,9 @@
+import contextlib
 import itertools
 import os
 import pathlib
 import stat
-from typing import Iterator, Union
+from typing import Iterator, Union, Collection, Dict
 
 
 def _resolve_symlink(src: pathlib.Path) -> pathlib.Path:
@@ -151,3 +152,49 @@ def ensure_reg(path: os.PathLike, content: Union[bytes, str]) -> bool:
             raise FileExistsError(f"File exists (wrong content): {path}")
 
     return False
+
+
+_STABLE_ATTRS = {
+    "st_mode",
+    "st_uid",
+    "st_gid",
+    "st_mtime",
+    "st_ctime",
+}
+
+
+def _calc_fingerprint(
+    path: pathlib.Path, follow_symlinks: bool, attrs: Collection[str]
+) -> Dict:
+    if follow_symlinks:
+        s = path.stat()
+    else:
+        s = path.lstat()
+    if stat.S_ISDIR(s.st_mode):
+        return {
+            "content": [
+                _calc_fingerprint(child, follow_symlinks, attrs)
+                for child in path.iterdir()
+            ],
+            **{attr: getattr(s, attr) for attr in attrs},
+        }
+    elif stat.S_ISLNK(s.st_mode):
+        return {
+            "content": os.readlink(path),
+            **{attr: getattr(s, attr) for attr in attrs},
+        }
+    elif stat.S_ISREG(s.st_mode):
+        return {
+            "content": path.read_text(),
+            **{attr: getattr(s, attr) for attr in attrs},
+        }
+    else:
+        raise ValueError
+
+
+@contextlib.contextmanager
+def assert_nullipotent(path):
+    before = _calc_fingerprint(path, False, _STABLE_ATTRS)
+    yield
+    after = _calc_fingerprint(path, False, _STABLE_ATTRS)
+    assert after == before
