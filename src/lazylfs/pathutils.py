@@ -172,10 +172,10 @@ def _calc_fingerprint(
         s = path.lstat()
     if stat.S_ISDIR(s.st_mode):
         return {
-            "content": [
-                _calc_fingerprint(child, follow_symlinks, attrs)
+            "content": {
+                child.name: _calc_fingerprint(child, follow_symlinks, attrs)
                 for child in path.iterdir()
-            ],
+            },
             **{attr: getattr(s, attr) for attr in attrs},
         }
     elif stat.S_ISLNK(s.st_mode):
